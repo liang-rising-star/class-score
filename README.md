@@ -7,6 +7,8 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-Repository-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/repository/docker/wsxxstar/class-score/general)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?logo=github&logoColor=white)](https://github.com/liang-rising-star/class-score)
 
 </div>
 
@@ -31,19 +33,28 @@
 
 ### 方式一：Docker 部署（推荐）
 
+#### Docker 镜像版本
+
+| 版本标签 | 架构 | 说明 |
+|:---:|:---:|:---|
+| `latest` | x86 | 最新版本 |
+| `1.0` | x86 | 稳定版本 1.0 |
+| - | ARM | 暂未构建（后续有计划） |
+
+> 💡 **ARM 架构说明**：目前暂未构建 ARM 架构的镜像，后续有计划支持。如果需要在 ARM 设备上运行，请自行拉取代码构建。
+
 #### 使用 Docker run
 
 ```bash
-# 直接运行预构建镜像
-docker run -d --name class-score -p 8000:8000 -v ./data:/app/data wsxxstar/class-score
+docker run -d --name class-score -p 8000:8000 -v ./data:/app/data wsxxstar/class-score:latest
 ```
 
 #### 使用 Docker Compose
 
 ```yaml
-rvices:
+services:
   class-score:
-    image: wsxxstar/class-score
+    image: wsxxstar/class-score:latest
     ports:
       - "8000:8000"
     volumes:
