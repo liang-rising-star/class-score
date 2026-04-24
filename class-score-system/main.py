@@ -15,6 +15,8 @@ from docx import Document
 from docx.shared import Cm, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml.ns import qn
+from lxml import etree
 
 app = FastAPI()
 
@@ -23,6 +25,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 配置静态文件
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
+# 提供logo.ico文件访问
+@app.get("/logo.ico")
+async def get_logo():
+    logo_path = os.path.join(BASE_DIR, "logo.ico")
+    if os.path.exists(logo_path):
+        return FileResponse(logo_path, media_type="image/x-icon")
+    raise HTTPException(status_code=404, detail="Logo not found")
 
 # 配置Jinja2模板（直接使用，绕过starlette缓存的bug）
 template_env = Environment(loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")), autoescape=True)
@@ -141,13 +151,108 @@ def generate_barcode_image(barcode_data):
     buf = io.BytesIO()
     code.write(buf, options={
         'module_width': 0.25,
-        'module_height': 12.0,
+        'module_height': 7.0,
         'write_text': False,
         'quiet_zone': 0.5,
         'format': 'PNG',
     })
     buf.seek(0)
     return buf
+
+# 辅助：给段落添加 tab stop
+def add_tab_stop(paragraph, tab_val, tab_pos):
+    pPr = paragraph._element.get_or_add_pPr()
+    tabs = pPr.makeelement(qn('w:tabs'), {})
+    tab = tabs.makeelement(qn('w:tab'), {
+        qn('w:val'): tab_val,
+        qn('w:pos'): tab_pos,
+    })
+    tabs.append(tab)
+    pPr.append(tabs)
+
+# 辅助：生成面额文本框（锚定在段落右侧，三号字大字效果）
+_shape_id_counter = [100]
+
+def make_amount_textbox(amount_text):
+    """生成面额文本框的 mc:AlternateContent XML 元素"""
+    _shape_id_counter[0] += 1
+    doc_pr_id = _shape_id_counter[0]
+    font_sz = 32  # 三号 = 16pt = 半磅单位32
+    cx = 706120   # 文本框宽
+    cy = 325120   # 文本框高（约两行）
+    pos_h = 1386840  # 水平偏移
+    pos_v = 19050    # 垂直偏移
+
+    xml_template = f'''<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+  xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+  xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <mc:Choice Requires="wps">
+    <w:drawing>
+      <wp:anchor distT="0" distB="0" distL="114300" distR="114300" simplePos="0"
+        relativeHeight="251659264" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
+        <wp:simplePos x="0" y="0"/>
+        <wp:positionH relativeFrom="column">
+          <wp:posOffset>{pos_h}</wp:posOffset>
+        </wp:positionH>
+        <wp:positionV relativeFrom="paragraph">
+          <wp:posOffset>{pos_v}</wp:posOffset>
+        </wp:positionV>
+        <wp:extent cx="{cx}" cy="{cy}"/>
+        <wp:effectExtent l="0" t="0" r="10160" b="10160"/>
+        <wp:wrapNone/>
+        <wp:docPr id="{doc_pr_id}" name="文本框 {doc_pr_id}"/>
+        <wp:cNvGraphicFramePr/>
+        <a:graphic>
+          <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+            <wps:wsp>
+              <wps:cNvSpPr txBox="1"/>
+              <wps:spPr>
+                <a:xfrm>
+                  <a:off x="0" y="0"/>
+                  <a:ext cx="{cx}" cy="{cy}"/>
+                </a:xfrm>
+                <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+                <a:solidFill><a:schemeClr val="lt1"/></a:solidFill>
+                <a:ln w="6350"><a:noFill/></a:ln>
+              </wps:spPr>
+              <wps:txbx>
+                <w:txbxContent>
+                  <w:p>
+                    <w:pPr>
+                      <w:rPr>
+                        <w:sz w:val="{font_sz}"/>
+                        <w:szCs w:val="{font_sz}"/>
+                      </w:rPr>
+                    </w:pPr>
+                    <w:r>
+                      <w:rPr>
+                        <w:b/>
+                        <w:sz w:val="{font_sz}"/>
+                        <w:szCs w:val="{font_sz}"/>
+                      </w:rPr>
+                      <w:t>{amount_text}</w:t>
+                    </w:r>
+                  </w:p>
+                </w:txbxContent>
+              </wps:txbx>
+              <wps:bodyPr rot="0" spcFirstLastPara="0" vertOverflow="overflow"
+                horzOverflow="overflow" vert="horz" wrap="square"
+                lIns="91440" tIns="45720" rIns="91440" bIns="45720"
+                numCol="1" spcCol="0" rtlCol="0" fromWordArt="0"
+                anchor="t" anchorCtr="0" forceAA="0" compatLnSpc="1">
+                <a:noAutofit/>
+              </wps:bodyPr>
+            </wps:wsp>
+          </a:graphicData>
+        </a:graphic>
+      </wp:anchor>
+    </w:drawing>
+  </mc:Choice>
+</mc:AlternateContent>'''
+    return etree.fromstring(xml_template.encode('utf-8'))
 
 # 导出Word文档
 def export_to_word(class_name, title, amount, codes, issue_date):
@@ -161,29 +266,85 @@ def export_to_word(class_name, title, amount, codes, issue_date):
 
     # 设置页面边距
     for section in doc.sections:
-        section.left_margin = Cm(1.5)
-        section.right_margin = Cm(1.5)
-        section.top_margin = Cm(1.5)
-        section.bottom_margin = Cm(1.5)
+        section.left_margin = Cm(1.0)
+        section.right_margin = Cm(1.0)
+        section.top_margin = Cm(0.5)
+        section.bottom_margin = Cm(0.5)
 
-    # 每页2列5行 = 10张卡片
-    rows_per_page = 5
-    columns = 2
-    items_per_page = rows_per_page * columns
+    # 每页3列7行 = 21张卡片
+    rows_per_page = 7
+    columns = 3
+    column_width = 6.0  # cm
+    row_height_twip = '2131'  # ≈3.76cm，exact固定
+    items_per_page = rows_per_page * columns  # 3列7行 = 21张卡片
+    tab_right_pos = str(int(column_width * 567))
 
     for page_idx, page_codes in enumerate([codes[i:i+items_per_page] for i in range(0, len(codes), items_per_page)]):
         if page_idx > 0:
             doc.add_page_break()
 
-        actual_rows = (len(page_codes) + columns - 1) // columns
-        table = doc.add_table(rows=actual_rows, cols=columns)
+        # 始终使用完整的8行表格，避免浪费纸张
+        table = doc.add_table(rows=rows_per_page, cols=columns)
         table.autofit = False
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
-        # 设置列宽
+        # 设置列宽 + 固定行高 + 垂直居中
         for row in table.rows:
+            tr = row._tr
+            trPr = tr.get_or_add_trPr()
+            trHeight = trPr.makeelement(qn('w:trHeight'), {
+                qn('w:val'): row_height_twip,
+                qn('w:hRule'): 'exact',
+            })
+            trPr.append(trHeight)
+
             for cell in row.cells:
-                cell.width = Cm(9)
+                cell.width = Cm(column_width)
+                tc = cell._tc
+                tcPr = tc.get_or_add_tcPr()
+                vAlign = tcPr.makeelement(qn('w:vAlign'), {qn('w:val'): 'center'})
+                tcPr.append(vAlign)
+                
+                # 设置单元格边框为黑色
+                tcBorders = tcPr.makeelement(qn('w:tcBorders'))
+                
+                # 上边框
+                top = tcBorders.makeelement(qn('w:top'), {
+                    qn('w:val'): 'single',
+                    qn('w:sz'): '4',
+                    qn('w:space'): '0',
+                    qn('w:color'): '000000'
+                })
+                tcBorders.append(top)
+                
+                # 下边框
+                bottom = tcBorders.makeelement(qn('w:bottom'), {
+                    qn('w:val'): 'single',
+                    qn('w:sz'): '4',
+                    qn('w:space'): '0',
+                    qn('w:color'): '000000'
+                })
+                tcBorders.append(bottom)
+                
+                # 左边框
+                left = tcBorders.makeelement(qn('w:left'), {
+                    qn('w:val'): 'single',
+                    qn('w:sz'): '4',
+                    qn('w:space'): '0',
+                    qn('w:color'): '000000'
+                })
+                tcBorders.append(left)
+                
+                # 右边框
+                right = tcBorders.makeelement(qn('w:right'), {
+                    qn('w:val'): 'single',
+                    qn('w:sz'): '4',
+                    qn('w:space'): '0',
+                    qn('w:color'): '000000'
+                })
+                tcBorders.append(right)
+                
+                tcPr.append(tcBorders)
 
         # 填充数据
         for i, code in enumerate(page_codes):
@@ -195,54 +356,66 @@ def export_to_word(class_name, title, amount, codes, issue_date):
             for p in cell.paragraphs:
                 p._element.getparent().remove(p._element)
 
-            # 标题 "班级积分卡"
+            # 段落0：班级积分卡 + 右面板额文本框
             p = cell.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            p.paragraph_format.space_before = Pt(4)
-            p.paragraph_format.space_after = Pt(2)
+            p.paragraph_format.space_before = Pt(2)
+            p.paragraph_format.space_after = Pt(1)
+            p.paragraph_format.first_line_indent = Pt(0)
+
+            run_box = p.add_run()
+            run_box._element.append(make_amount_textbox(f"{amount}分"))
+
             run = p.add_run("班级积分卡")
             run.bold = True
-            run.font.size = Pt(12)
+            run.font.size = Pt(10)
 
-            # 分隔线
+            # 段落1：班级（tab stop左靠）
             p = cell.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.space_before = Pt(0)
-            p.paragraph_format.space_after = Pt(2)
-            run = p.add_run("─────────────")
-            run.font.size = Pt(6)
+            p.paragraph_format.space_after = Pt(0)
+            add_tab_stop(p, 'right', tab_right_pos)
+            run = p.add_run(f"班级：{class_name}")
+            run.font.size = Pt(9)
+            p.add_run('\t')
 
-            # 信息行
-            info_lines = [
-                f"班级：{class_name}",
-                f"标题：{title}",
-                f"面额：{amount}分",
-                f"日期：{issue_date}",
-            ]
-            for line in info_lines:
-                p = cell.add_paragraph()
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                run = p.add_run(line)
-                run.font.size = Pt(10)
+            # 段落2：标题 + 日期（tab stop左右锚定）
+            p = cell.add_paragraph()
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after = Pt(1)
+            add_tab_stop(p, 'right', tab_right_pos)
+            run = p.add_run(f"标题：{title}")
+            run.font.size = Pt(9)
+            p.add_run('\t')
+            run = p.add_run(f"日期：{issue_date}")
+            run.font.size = Pt(9)
 
-            # 条码图片
+            # 段落3：条码图片
             barcode_buf = generate_barcode_image(code)
             p = cell.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            p.paragraph_format.space_before = Pt(4)
+            p.paragraph_format.space_before = Pt(2)
             p.paragraph_format.space_after = Pt(0)
             run = p.add_run()
-            run.add_picture(barcode_buf, width=Cm(6))
+            run.add_picture(barcode_buf, width=Cm(5))
 
-            # 编号文字
+            # 段落4：编号
             p = cell.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            p.paragraph_format.space_before = Pt(2)
-            p.paragraph_format.space_after = Pt(2)
+            p.paragraph_format.space_before = Pt(1)
+            p.paragraph_format.space_after = Pt(1)
             run = p.add_run(code)
-            run.font.size = Pt(9)
+            run.font.size = Pt(8)
             run.font.name = 'Consolas'
+        
+        # 对于最后一页，填充剩余的空白单元格
+        total_cells = rows_per_page * columns
+        for i in range(len(page_codes), total_cells):
+            row_idx = i // columns
+            col_idx = i % columns
+            cell = table.cell(row_idx, col_idx)
+            # 清空默认段落
+            for p in cell.paragraphs:
+                p._element.getparent().remove(p._element)
 
     filename = f"{class_name}_{title}_{amount}分_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.docx"
     filepath = os.path.join(output_dir, filename)
@@ -409,19 +582,30 @@ async def verify(request: Request):
         return RedirectResponse(url="/login")
     config = read_config()
     system_name = config["system"]["name"]
-    return render_template("verify.html", {"system_name": system_name, "results": None, "total_amount": 0})
+    return render_template("verify.html", {"system_name": system_name, "results": None, "total_amount": 0, "error": None})
 
 # 最近一次核销结果
 last_verify_result = {}
 
 # 提交核销
 @app.post("/verify")
-async def submit_verify(request: Request, codes: str = Form(...)):
+async def submit_verify(request: Request, codes: str = Form(None)):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    init_db()
     config = read_config()
+    system_name = config["system"]["name"]
+
+    # 空编码检查
+    if not codes or not codes.strip():
+        return render_template("verify.html", {
+            "system_name": system_name,
+            "results": None,
+            "total_amount": 0,
+            "error": "请输入或扫描积分编号后再核销",
+        })
+
+    init_db()
     db_path = get_db_path()
 
     conn = sqlite3.connect(db_path)
@@ -447,7 +631,6 @@ async def submit_verify(request: Request, codes: str = Form(...)):
     conn.commit()
     conn.close()
 
-    system_name = config["system"]["name"]
     last_verify_result["data"] = {
         "system_name": system_name,
         "results": results,
@@ -468,6 +651,7 @@ async def verify_result(request: Request):
         "system_name": result["system_name"],
         "results": result["results"],
         "total_amount": result["total_amount"],
+        "error": None,
     })
 
 # 最近一次设置结果

@@ -3,117 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/logo.ico" type="image/x-icon">
     <title>核销积分</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f8f9fa;
-            color: #333;
-        }
-        .header {
-            background-color: white;
-            padding: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .header h1 {
-            font-size: 24px;
-            font-weight: 600;
-        }
-        .header a {
-            color: #007bff;
-            text-decoration: none;
-            font-size: 16px;
-        }
-        .header a:hover {
-            text-decoration: underline;
-        }
-        .container {
-            max-width: 800px;
-            margin: 40px auto;
-            padding: 0 20px;
-        }
-        .form-container {
-            background-color: white;
-            padding: 40px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h2 {
-            font-size: 20px;
-            margin-bottom: 30px;
-            color: #333;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            margin-bottom: 8px;
-            color: #555;
-            font-weight: 500;
-        }
-        textarea {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 16px;
-            min-height: 200px;
-            font-family: inherit;
-        }
-        button {
-            padding: 12px 30px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-        button:hover {
-            background-color: #0069d9;
-        }
-        .results {
-            margin-top: 30px;
-        }
-        .results h3 {
-            margin-bottom: 15px;
-            font-size: 18px;
-        }
-        .result-item {
-            padding: 10px 14px;
-            border-radius: 4px;
-            margin-bottom: 8px;
-        }
-        .result-item.success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .result-item.error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .total-box {
-            margin-top: 20px;
-            padding: 15px 20px;
-            background-color: #cce5ff;
-            color: #004085;
-            border: 1px solid #b8daff;
-            border-radius: 8px;
-            font-size: 18px;
-            font-weight: 600;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; color: #333; }
+        .header { background-color: white; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 24px; font-weight: 600; }
+        .header a { color: #007bff; text-decoration: none; font-size: 16px; }
+        .header a:hover { text-decoration: underline; }
+        .container { max-width: 900px; margin: 40px auto; padding: 0 20px; }
+        .form-container { background-color: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h2 { font-size: 20px; margin-bottom: 30px; color: #333; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; color: #555; font-weight: 500; }
+        textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; min-height: 200px; font-family: inherit; }
+        button { padding: 12px 30px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; transition: background-color 0.3s; }
+        button:hover { background-color: #0069d9; }
+        .results { margin-top: 30px; }
+        .results h3 { margin-bottom: 15px; font-size: 18px; }
+        .result-item { padding: 10px 14px; border-radius: 4px; margin-bottom: 8px; }
+        .result-item.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .result-item.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .total-box { margin-top: 20px; padding: 15px 20px; background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; border-radius: 8px; font-size: 18px; font-weight: 600; }
+        .error-box { padding: 12px 16px; background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 4px; margin-bottom: 20px; }
+
+        /* ---- 扫码 ---- */
+        .scan-layout { display: flex; gap: 25px; align-items: flex-start; }
+        .scan-column-left { flex: 1; min-width: 0; }
+        .scan-column-right { width: 340px; flex-shrink: 0; }
+        .button-row { display: flex; gap: 12px; flex-wrap: wrap; }
+        .btn-scan { background-color: #28a745; color: white; }
+        .btn-scan:hover { background-color: #218838; }
+        .btn-scan.scanning { background-color: #dc3545; }
+        .btn-scan.scanning:hover { background-color: #c82333; }
+        .btn-photo { background-color: #17a2b8; color: white; }
+        .btn-photo:hover { background-color: #138496; }
+        .scanner-wrapper { background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden; }
+        .scanner-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8f9fa; border-bottom: 1px solid #e9ecef; }
+        .scanner-header h4 { margin: 0; font-size: 14px; color: #333; font-weight: 500; }
+        .scanner-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #666; padding: 0 4px; line-height: 1; }
+        .scanner-close:hover { color: #333; background: none; }
+        .scanner-box { position: relative; width: 100%; overflow: hidden; background: #000; }
+        .scan-line-box { position: relative; }
+        .scan-line { position: absolute; left: 5%; width: 90%; height: 2px; background: #ff3333; box-shadow: 0 0 8px #ff3333; animation: scanLine 2s ease-in-out infinite; z-index: 10; pointer-events: none; }
+        @keyframes scanLine { 0% { top: 10%; } 50% { top: 90%; } 100% { top: 10%; } }
+        .scan-flash { position: absolute; inset: 0; background: rgba(0,255,0,0.25); pointer-events: none; z-index: 11; animation: flashFade 0.5s ease-out forwards; }
+        @keyframes flashFade { from { opacity: 1; } to { opacity: 0; } }
+        .scan-status { padding: 10px 14px; font-size: 13px; color: #666; text-align: center; transition: all 0.3s; }
+        .scan-status.success { color: #155724; background: #d4edda; font-weight: 600; }
+        .scan-results { padding: 0 14px 12px; display: flex; flex-wrap: wrap; gap: 4px; }
+        .scan-result-item { display: inline-block; background: #e8f4fd; color: #004085; padding: 3px 10px; border-radius: 12px; font-size: 13px; font-family: Consolas, monospace; transition: transform 0.2s; }
+        .photo-area { text-align: center; padding: 30px 20px; }
+        .photo-area p { color: #666; font-size: 14px; margin-bottom: 15px; }
+        .photo-area input[type="file"] { display: none; }
+        .btn-take-photo { background-color: #17a2b8; color: white; border: none; padding: 14px 30px; border-radius: 4px; font-size: 16px; cursor: pointer; transition: background-color 0.3s; }
+        .btn-take-photo:hover { background-color: #138496; }
+        .secure-hint { margin-bottom: 12px; padding: 8px 12px; background: #fff3cd; color: #856404; border: 1px solid #ffeeba; border-radius: 4px; font-size: 13px; display: none; }
+        #scannerVideo video { width: 100% !important; height: auto !important; border-radius: 0; object-fit: cover; }
+        #scannerVideo { width: 100%; }
+        @media (max-width: 700px) { .scan-layout { flex-direction: column; } .scan-column-right { width: 100%; } }
     </style>
 </head>
 <body>
@@ -124,13 +73,60 @@
     <div class="container">
         <div class="form-container">
             <h2>核销积分</h2>
-            <form action="/verify" method="post">
-                <div class="form-group">
-                    <label for="codes">编码（每行一个）</label>
-                    <textarea id="codes" name="codes" placeholder="请输入或扫描积分编号，每行一个"></textarea>
+
+            {% if error %}
+            <div class="error-box">{{ error }}</div>
+            {% endif %}
+
+            <div id="secureHint" class="secure-hint"></div>
+
+            <form action="/verify" method="post" onsubmit="return onVerifySubmit()">
+                <div class="scan-layout">
+                    <div class="scan-column-left">
+                        <div class="form-group">
+                            <label for="codes">编码（每行一个）</label>
+                            <textarea id="codes" name="codes" placeholder="请输入或扫描积分编号，每行一个"></textarea>
+                        </div>
+                        <div class="button-row">
+                            <button type="submit">校验核销</button>
+                            <button type="button" id="scanBtn" class="btn-scan">启动摄像头扫码</button>
+                            <button type="button" id="photoBtn" class="btn-photo" style="display:none">拍照识别</button>
+                        </div>
+                    </div>
+
+                    <div class="scan-column-right">
+                        <!-- 实时扫码区 -->
+                        <div id="scannerWrapper" class="scanner-wrapper" style="display:none">
+                            <div class="scanner-header">
+                                <h4>实时扫码</h4>
+                                <button type="button" id="scannerClose" class="scanner-close">&times;</button>
+                            </div>
+                            <div id="scannerBox" class="scanner-box scan-line-box">
+                                <div id="scannerVideo"></div>
+                                <div class="scan-line"></div>
+                            </div>
+                            <div id="scanStatus" class="scan-status">扫描中...请将条码对准摄像头</div>
+                            <div id="scanResults" class="scan-results"></div>
+                        </div>
+
+                        <!-- 拍照识别区 -->
+                        <div id="photoWrapper" class="scanner-wrapper" style="display:none">
+                            <div class="scanner-header">
+                                <h4>拍照识别</h4>
+                                <button type="button" id="photoClose" class="scanner-close">&times;</button>
+                            </div>
+                            <div class="photo-area">
+                                <p>点击下方按钮拍照或选择条码图片</p>
+                                <input type="file" id="photoInput" accept="image/*" capture="environment">
+                                <button type="button" class="btn-take-photo" onclick="document.getElementById('photoInput').click()">拍照 / 选择图片</button>
+                                <div id="photoStatus" class="photo-status" style="margin-top:10px"></div>
+                            </div>
+                            <div id="photoResults" class="scan-results"></div>
+                        </div>
+                    </div>
                 </div>
-                <button type="submit">校验核销</button>
             </form>
+
             {% if results %}
             <div class="results">
                 <h3>校验结果</h3>
@@ -150,5 +146,238 @@
             {% endif %}
         </div>
     </div>
+
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <!-- 拍照识别用的离屏容器（不能 display:none，否则 html5-qrcode 初始化失败） -->
+    <div id="photoScanRegion" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden"></div>
+    <script>
+    function onVerifySubmit() {
+        var codes = document.getElementById('codes').value.trim();
+        if (!codes) {
+            var hint = document.getElementById('secureHint');
+            hint.textContent = '请输入或扫描积分编号后再核销';
+            hint.style.display = 'block';
+            hint.style.background = '#f8d7da';
+            hint.style.color = '#721c24';
+            hint.style.borderColor = '#f5c6cb';
+            return false;
+        }
+        return true;
+    }
+
+    (function() {
+        var codesTextarea = document.getElementById('codes');
+        var scanBtn = document.getElementById('scanBtn');
+        var photoBtn = document.getElementById('photoBtn');
+        var scannerWrapper = document.getElementById('scannerWrapper');
+        var scannerClose = document.getElementById('scannerClose');
+        var scannerBox = document.getElementById('scannerBox');
+        var scanStatus = document.getElementById('scanStatus');
+        var scanResults = document.getElementById('scanResults');
+        var photoWrapper = document.getElementById('photoWrapper');
+        var photoClose = document.getElementById('photoClose');
+        var photoInput = document.getElementById('photoInput');
+        var photoStatus = document.getElementById('photoStatus');
+        var photoResults = document.getElementById('photoResults');
+        var secureHint = document.getElementById('secureHint');
+
+        var html5QrCode = null;
+        var isScanning = false;
+        var recentCodes = {};  // { code: timestamp }  每个编码独立防抖
+
+        // HTTPS/localhost → 实时扫码，否则 → 拍照降级
+        var isSecureContext = window.isSecureContext;
+        var hasGetUserMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+        if (isSecureContext && hasGetUserMedia) {
+            scanBtn.style.display = '';
+        } else {
+            scanBtn.style.display = 'none';
+            photoBtn.style.display = '';
+            if (!secureHint.textContent) {
+                secureHint.textContent = '当前为 HTTP 访问，不支持实时摄像头扫码，已切换为拍照识别模式。如需实时扫码请使用 HTTPS 或 localhost 访问。';
+                secureHint.style.display = 'block';
+            }
+        }
+
+        // ============ 实时扫码（html5-qrcode / ZXing） ============
+
+        function startScanning() {
+            if (isScanning) return;
+            if (typeof Html5Qrcode === 'undefined') {
+                alert('扫码库加载失败，请检查网络连接后刷新页面');
+                return;
+            }
+
+            scannerWrapper.style.display = 'block';
+            scanResults.innerHTML = '';
+            scanStatus.textContent = '正在启动摄像头...';
+            scanStatus.className = 'scan-status';
+
+            html5QrCode = new Html5Qrcode("scannerVideo", {
+                formatsToSupport: [ Html5QrcodeSupportedFormats.CODE_128 ],
+                useBarCodeDetectorIfSupported: false
+            });
+
+            html5QrCode.start(
+                { facingMode: "environment" },
+                {
+                    fps: 20,
+                    qrbox: function(viewfinderWidth, viewfinderHeight) {
+                        var w = Math.floor(viewfinderWidth * 0.8);
+                        var h = Math.floor(viewfinderHeight * 0.4);
+                        return { width: w, height: h };
+                    },
+                    aspectRatio: 1.5,
+                    formatsToSupport: [ Html5QrcodeSupportedFormats.CODE_128 ],
+                    disableFlip: true,
+                },
+                onScanSuccess,
+                onScanFailure
+            ).then(function() {
+                isScanning = true;
+                scanBtn.textContent = '停止扫码';
+                scanBtn.classList.add('scanning');
+                scanStatus.textContent = '扫描中...请将条码对准摄像头';
+                scanStatus.className = 'scan-status';
+            }).catch(function(err) {
+                scanStatus.textContent = '摄像头启动失败：' + (err.message || err);
+                scanStatus.className = 'scan-status';
+            });
+        }
+
+        function stopScanning() {
+            if (!isScanning || !html5QrCode) return;
+            html5QrCode.stop().then(function() {
+                isScanning = false;
+                html5QrCode.clear();
+                scanBtn.textContent = '启动摄像头扫码';
+                scanBtn.classList.remove('scanning');
+                scanStatus.textContent = '扫码已停止';
+                scanStatus.className = 'scan-status';
+            }).catch(function() {
+                isScanning = false;
+                scanBtn.textContent = '启动摄像头扫码';
+                scanBtn.classList.remove('scanning');
+            });
+        }
+
+        function onScanSuccess(decodedText) {
+            var code = decodedText.toUpperCase().trim();
+
+            // 校验格式：10位大写字母+数字
+            if (!/^[A-Z0-9]{10}$/.test(code)) return;
+
+            // 去重：如果textarea中已存在该编码，跳过
+            var existing = codesTextarea.value.trim().split('\n')
+                .map(function(c) { return c.trim().toUpperCase(); })
+                .filter(function(c) { return c.length > 0; });
+            if (existing.indexOf(code) !== -1) return;
+
+            // 短暂防抖：同一编码0.5秒内不重复（仅防止同帧多次回调）
+            var now = Date.now();
+            if (recentCodes[code] && (now - recentCodes[code] < 500)) return;
+            recentCodes[code] = now;
+
+            addCodeToTextarea(code);
+
+            // 绿色闪烁
+            var flash = document.createElement('div');
+            flash.className = 'scan-flash';
+            scannerBox.appendChild(flash);
+            setTimeout(function() { flash.remove(); }, 600);
+
+            scanStatus.textContent = '识别成功：' + code;
+            scanStatus.className = 'scan-status success';
+            setTimeout(function() {
+                if (isScanning) {
+                    scanStatus.textContent = '扫描中...请将条码对准摄像头';
+                    scanStatus.className = 'scan-status';
+                }
+            }, 2000);
+
+            addDetectedChip(scanResults, code);
+            if (navigator.vibrate) navigator.vibrate(100);
+        }
+
+        function onScanFailure() {
+            // 静默，每帧都在调，大部分都会失败
+        }
+
+        // ============ 拍照识别 ============
+
+        photoBtn.addEventListener('click', function() { photoWrapper.style.display = 'block'; });
+        photoClose.addEventListener('click', function() { photoWrapper.style.display = 'none'; });
+
+        photoInput.addEventListener('change', function(e) {
+            var file = e.target.files[0];
+            if (!file) return;
+            photoStatus.textContent = '正在识别...';
+            photoStatus.className = 'photo-status';
+
+            if (typeof Html5Qrcode === 'undefined') {
+                photoStatus.textContent = '扫码库加载失败，请检查网络连接';
+                return;
+            }
+
+            var scanner = new Html5Qrcode("photoScanRegion", { formatsToSupport: [ Html5QrcodeSupportedFormats.CODE_128 ] });
+            scanner.scanFile(file, /* showImage= */ false)
+                .then(function(decodedText) {
+                    var code = decodedText.toUpperCase().trim();
+                    if (/^[A-Z0-9]{10}$/.test(code)) {
+                        addCodeToTextarea(code);
+                        photoStatus.textContent = '识别成功：' + code;
+                        photoStatus.className = 'photo-status success';
+                        addDetectedChip(photoResults, code);
+                        if (navigator.vibrate) navigator.vibrate(100);
+                    } else {
+                        photoStatus.textContent = '识别到编码但格式不符：' + code;
+                    }
+                })
+                .catch(function(err) {
+                    console.error('Photo scan error:', err);
+                    photoStatus.textContent = '未识别到条码，请重新拍摄，确保条码清晰完整';
+                })
+                .finally(function() {
+                    photoInput.value = '';
+                    try { scanner.clear(); } catch(e) {}
+                });
+        });
+
+        // ============ 公共函数 ============
+
+        function addCodeToTextarea(code) {
+            var existing = codesTextarea.value.trim().split('\n')
+                .map(function(c) { return c.trim().toUpperCase(); })
+                .filter(function(c) { return c.length > 0; });
+            if (existing.indexOf(code) === -1) {
+                if (codesTextarea.value.trim()) codesTextarea.value += '\n';
+                codesTextarea.value += code;
+            }
+            codesTextarea.scrollTop = codesTextarea.scrollHeight;
+        }
+
+        function addDetectedChip(container, code) {
+            var chip = document.createElement('span');
+            chip.className = 'scan-result-item';
+            chip.textContent = code;
+            container.prepend(chip);
+            chip.style.transform = 'scale(1.3)';
+            setTimeout(function() { chip.style.transform = 'scale(1)'; }, 200);
+        }
+
+        // ============ 事件绑定 ============
+
+        scanBtn.addEventListener('click', function() {
+            if (isScanning) stopScanning();
+            else startScanning();
+        });
+
+        scannerClose.addEventListener('click', function() {
+            stopScanning();
+            scannerWrapper.style.display = 'none';
+        });
+    })();
+    </script>
 </body>
 </html>
