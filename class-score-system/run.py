@@ -11,4 +11,14 @@ if "--reset" in sys.argv:
 import uvicorn
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # 解析命令行参数，支持 --port 指定端口
+    port = 8000
+    if "--port" in sys.argv:
+        port_index = sys.argv.index("--port")
+        if port_index + 1 < len(sys.argv):
+            try:
+                port = int(sys.argv[port_index + 1])
+            except ValueError:
+                pass
+    
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

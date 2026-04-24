@@ -67,7 +67,7 @@ services:
 ```
 
 ### 方式二：本地运行
-
+#### 使用本机Python运行服务
 ```bash
 cd class-score-system
 
@@ -80,11 +80,37 @@ python run.py
 
 Windows 用户可直接双击 `启动.bat` 或 `run.exe`（内置 Python 运行时，无需安装 Python）。
 
+#### 使用软件包内置 Python 运行时
+
+如果使用内置 Python 运行时，可通过以下指令自定义端口：
+
+```bash
+# 切换到 class-score-system 目录
+cd class-score-system
+
+# 使用内置 Python 运行时并指定端口（例如 8080）
+./python/python.exe run.py --port 8080
+```
+
+#### 修改运行.bat
+
+要修改 `启动.bat` 文件以使用自定义端口，可按照以下步骤操作：
+
+1. 用文本编辑器打开 `启动.bat` 文件
+2. 修改其中的端口参数，例如：
+   ```batch
+   @echo off
+   cd class-score-system
+   .\python\python.exe run.py --port 8080
+   pause
+   ```
+3. 保存文件后双击运行，服务将在指定端口启动
+
 ## ⚠️ 注意事项
 
 ### 服务启动
 - 启动后会弹出命令行窗口，**请勿关闭**，关闭后服务将停止运行
-- 服务默认运行在 `8000` 端口，请确保该端口未被占用
+- 服务默认运行在 `8000` 端口，请确保该端口未被占用（已被占用？请参考前文自定义端口方法）
 
 ### 访问方式
 - 在本机浏览器中访问：`http://localhost:8000` 或 `http://127.0.0.1:8000`
