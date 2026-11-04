@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# 运行时数据：数据库、导出文件、含管理员口令的配置，禁止入库
+class-score-system/data/
+class-score-system/db/
+class-score-system/output/
+
+# 内嵌 CPython 运行时（约 430MB / 1.3 万个文件），不入库。
+# 需要时从 python.org 下载 Windows embeddable 包解压到该目录，
+# 或用 `git log --all -- class-score-system/python` 找回历史版本；
+# 临时重新纳入版本管理请用 `git add -f class-score-system/python`。
+class-score-system/python/
+
+# 打包/构建产物
+build/
+dist/
+*.spec
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
