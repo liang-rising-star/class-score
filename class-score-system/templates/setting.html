@@ -363,6 +363,31 @@
         }).catch(function() { submitWith(''); });
     });
 })();
+
+// 提交后保持在原来的滚动位置（避免每次操作完都被弹回页面顶部）
+(function() {
+    var KEY = 'class-score:setting-scroll';
+
+    // 任何表单提交前记下当前位置
+    document.addEventListener('submit', function() {
+        try { sessionStorage.setItem(KEY, String(window.scrollY || window.pageYOffset || 0)); } catch (e) {}
+    }, true);
+
+    // 页面加载后还原一次，用完即清
+    try {
+        var saved = sessionStorage.getItem(KEY);
+        if (saved !== null) {
+            sessionStorage.removeItem(KEY);
+            var y = parseInt(saved, 10) || 0;
+            if (y > 0) {
+                window.scrollTo(0, y);
+                // 等一帧，防止弹窗/提示条插入后高度变化把位置顶回去
+                requestAnimationFrame(function() { window.scrollTo(0, y); });
+            }
+        }
+    } catch (e) {}
+})();
+
 </script>
 
 </body>
