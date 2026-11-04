@@ -10,6 +10,8 @@ import os
 import io
 import re
 import time
+import threading
+import zipfile
 import secrets
 import string
 import barcode
@@ -177,6 +179,13 @@ def get_default_config():
         "admin": {
             "username": "",
             "password": ""
+        },
+        "backup": {
+            "interval_hours": 24,
+            "keep": 10
+        },
+        "desktop": {
+            "autostart": False
         }
     }
 
@@ -234,6 +243,175 @@ def get_db_path():
     if not os.path.isabs(db_path):
         db_path = os.path.join(BASE_DIR, db_path)
     return db_path
+
+# ==================== 备份 / 清理 ====================
+
+BACKUP_PREFIX = "classscore-backup-"
+MAX_BACKUP_HOURS = 24 * 30      # 定时备份最长间隔 30 天
+MAX_BACKUP_KEEP = 200
+
+
+def get_backup_dir():
+    path = os.path.join(DATA_DIR, "backups")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def list_backups():
+    """按时间升序返回备份文件名。"""
+    directory = get_backup_dir()
+    files = [f for f in os.listdir(directory)
+             if f.startswith(BACKUP_PREFIX) and f.endswith(".zip")]
+    return sorted(files)
+
+
+def last_backup_time():
+    files = list_backups()
+    if not files:
+        return None
+    path = os.path.join(get_backup_dir(), files[-1])
+    return datetime.datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def create_backup():
+    """把配置和数据库打包成一个 zip，并清理超出保留份数的旧备份。"""
+    directory = get_backup_dir()
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = os.path.join(directory, f"{BACKUP_PREFIX}{stamp}.zip")
+
+    db_path = get_db_path()
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
+        if os.path.exists(CONFIG_PATH):
+            zf.write(CONFIG_PATH, "config.json")
+        if os.path.exists(db_path):
+            zf.write(db_path, "db/scores.db")
+
+    prune_backups()
+    return os.path.basename(target)
+
+
+def prune_backups():
+    try:
+        keep = int(read_config().get("backup", {}).get("keep", 10) or 0)
+    except (TypeError, ValueError):
+        keep = 10
+    if keep <= 0:
+        return
+    files = list_backups()
+    for name in files[:-keep]:
+        try:
+            os.remove(os.path.join(get_backup_dir(), name))
+        except OSError:
+            pass
+
+
+def _backup_loop():
+    """后台线程：按配置的间隔自动备份（interval_hours<=0 表示关闭）。"""
+    while True:
+        try:
+            hours = float(read_config().get("backup", {}).get("interval_hours", 24) or 0)
+            if hours > 0:
+                files = list_backups()
+                last = os.path.getmtime(os.path.join(get_backup_dir(), files[-1])) if files else 0
+                if time.time() - last >= hours * 3600:
+                    create_backup()
+        except Exception:
+            pass
+        time.sleep(60)
+
+
+def start_backup_scheduler():
+    thread = threading.Thread(target=_backup_loop, daemon=True, name="backup-scheduler")
+    thread.start()
+
+
+def output_stats():
+    """导出目录里的 Word 文件数量与总大小。"""
+    out = get_output_dir()
+    if not os.path.isdir(out):
+        return 0, 0
+    files = [f for f in os.listdir(out) if f.lower().endswith(".docx")]
+    size = 0
+    for f in files:
+        try:
+            size += os.path.getsize(os.path.join(out, f))
+        except OSError:
+            pass
+    return len(files), size
+
+
+def clean_output():
+    out = get_output_dir()
+    removed, freed = 0, 0
+    if not os.path.isdir(out):
+        return removed, freed
+    for name in os.listdir(out):
+        path = os.path.join(out, name)
+        if not os.path.isfile(path) or not name.lower().endswith(".docx"):
+            continue
+        try:
+            freed += os.path.getsize(path)
+            os.remove(path)
+            removed += 1
+        except OSError:
+            pass
+    return removed, freed
+
+
+JUNK_SKIP_DIRS = {"python", "data", ".git", "node_modules"}
+
+
+def junk_targets():
+    """返回可清理的垃圾路径：__pycache__ 目录、*.pyc、*.tmp。"""
+    targets = []
+    for root, dirs, files in os.walk(BASE_DIR):
+        dirs[:] = [d for d in dirs if d not in JUNK_SKIP_DIRS]
+        if os.path.basename(root) == "__pycache__":
+            targets.append(root)
+            dirs[:] = []
+            continue
+        for name in files:
+            if name.endswith((".pyc", ".pyo", ".tmp")):
+                targets.append(os.path.join(root, name))
+    return targets
+
+
+def junk_stats():
+    targets = junk_targets()
+    size = 0
+    for path in targets:
+        if os.path.isfile(path):
+            try:
+                size += os.path.getsize(path)
+            except OSError:
+                pass
+    return len(targets), size
+
+
+def clean_junk():
+    removed, freed = 0, 0
+    for path in junk_targets():
+        try:
+            if os.path.isdir(path):
+                import shutil
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                freed += os.path.getsize(path)
+                os.remove(path)
+            removed += 1
+        except OSError:
+            pass
+    return removed, freed
+
+
+def human_size(size):
+    size = float(size)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
 
 # 打开数据库连接（统一 row_factory，避免硬编码下标）
 def connect_db():
@@ -902,12 +1080,29 @@ async def setting(request: Request):
     config = read_config()
     system_name = config["system"]["name"]
     result = sess.pop("setting", None)
+    notice = sess.pop("notice", None)
+
+    backup_cfg = config.get("backup", {}) or {}
+    out_count, out_size = output_stats()
+    junk_count, junk_size = junk_stats()
+
     return render(request, "setting.html", {
         "system_name": system_name,
         "success": result == "success",
         "wrong_password": result == "wrong_password",
         "reset_wrong_password": result == "reset_wrong_password",
         "message": "新密码至少需要 4 位" if result == "weak" else None,
+        "notice": notice,
+        "backup_count": len(list_backups()),
+        "last_backup": last_backup_time(),
+        "backup_dir": get_backup_dir(),
+        "interval_hours": backup_cfg.get("interval_hours", 24),
+        "backup_keep": backup_cfg.get("keep", 10),
+        "autostart": bool((config.get("desktop") or {}).get("autostart", False)),
+        "cache_count": out_count,
+        "cache_size": human_size(out_size),
+        "junk_count": junk_count,
+        "junk_size": human_size(junk_size),
     })
 
 # 提交修改密码
@@ -956,6 +1151,102 @@ def do_reset():
     # 清空会话与登录节流记录
     sessions.clear()
     _login_failures.clear()
+
+# ---------------- 备份 ----------------
+
+@app.post("/backup/now")
+async def backup_now(request: Request, csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+    try:
+        name = create_backup()
+        sess["notice"] = {"kind": "success", "text": f"已创建备份：{name}"}
+    except Exception as exc:
+        sess["notice"] = {"kind": "error", "text": f"备份失败：{exc}"}
+    return RedirectResponse(url="/setting", status_code=303)
+
+
+@app.post("/backup/open")
+async def backup_open(request: Request, csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    directory = get_backup_dir()
+    opened = False
+    if os.name == "nt":
+        try:
+            os.startfile(directory)      # 本机运行时直接在资源管理器打开
+            opened = True
+        except Exception:
+            opened = False
+
+    sess["notice"] = {
+        "kind": "success" if opened else "info",
+        "text": f"备份目录：{directory}" if opened else f"请在文件管理器中打开：{directory}",
+    }
+    return RedirectResponse(url="/setting", status_code=303)
+
+
+@app.post("/backup/settings")
+async def backup_settings(request: Request, interval_hours: float = Form(24),
+                          keep: int = Form(10), autostart: str = Form(None),
+                          csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    if interval_hours < 0 or interval_hours > MAX_BACKUP_HOURS:
+        sess["notice"] = {"kind": "error", "text": f"备份间隔需在 0 - {MAX_BACKUP_HOURS} 小时之间（0 表示关闭定时备份）"}
+        return RedirectResponse(url="/setting", status_code=303)
+    if not 1 <= keep <= MAX_BACKUP_KEEP:
+        sess["notice"] = {"kind": "error", "text": f"保留份数需在 1 - {MAX_BACKUP_KEEP} 之间"}
+        return RedirectResponse(url="/setting", status_code=303)
+
+    config = read_config()
+    config.setdefault("backup", {})
+    config["backup"]["interval_hours"] = interval_hours
+    config["backup"]["keep"] = keep
+    config.setdefault("desktop", {})
+    config["desktop"]["autostart"] = bool(autostart)
+    write_config(config)
+
+    tip = "设置已保存"
+    if bool(autostart):
+        tip += "；开机自启将在下次启动桌面版时生效"
+    sess["notice"] = {"kind": "success", "text": tip}
+    return RedirectResponse(url="/setting", status_code=303)
+
+
+# ---------------- 清理 ----------------
+
+@app.post("/cleanup/cache")
+async def cleanup_cache(request: Request, csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    removed, freed = clean_output()
+    sess["notice"] = {"kind": "success", "text": f"已清理 {removed} 个导出文件，释放 {human_size(freed)}"}
+    return RedirectResponse(url="/setting", status_code=303)
+
+
+@app.post("/cleanup/junk")
+async def cleanup_junk(request: Request, csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    removed, freed = clean_junk()
+    sess["notice"] = {"kind": "success", "text": f"已清理 {removed} 项垃圾文件，释放 {human_size(freed)}"}
+    return RedirectResponse(url="/setting", status_code=303)
+
 
 # 提交恢复出厂设置
 @app.post("/reset")
@@ -1010,3 +1301,6 @@ async def download_file(request: Request, filename: str):
 
 # 初始化数据库
 init_db()
+
+# 启动定时备份（按 data/config.json 里的 backup.interval_hours）
+start_backup_scheduler()

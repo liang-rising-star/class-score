@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
+using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -70,6 +72,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             .ToArray();
         _launchArgs = string.Join(" ", all.Select(Quote));
 
+        ApplyAutostart(root);
+
         _server = new BackendServer(root);
         var url = _server.Start();
 
@@ -89,6 +93,48 @@ internal sealed class TrayApplicationContext : ApplicationContext
         };
 
         ShowMainWindow();
+    }
+
+    /// <summary>按 data/config.json 里的 desktop.autostart 增删开机启动项（当前用户 Run 键）。</summary>
+    private static void ApplyAutostart(string root)
+    {
+        const string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        const string valueName = "ClassScoreDesktop";
+
+        try
+        {
+            var configPath = Path.Combine(root, "class-score-system", "data", "config.json");
+            if (!File.Exists(configPath)) return;
+
+            var enabled = false;
+            using (var doc = JsonDocument.Parse(File.ReadAllText(configPath)))
+            {
+                if (doc.RootElement.TryGetProperty("desktop", out var desktop) &&
+                    desktop.TryGetProperty("autostart", out var flag))
+                {
+                    enabled = flag.ValueKind == JsonValueKind.True;
+                }
+            }
+
+            using var key = Registry.CurrentUser.OpenSubKey(runKey, writable: true);
+            if (key is null) return;
+
+            if (enabled)
+            {
+                var exe = Environment.ProcessPath ?? Application.ExecutablePath;
+                key.SetValue(valueName, $"\"{exe}\" --root \"{root}\"");
+                AppLog.Write("autostart: 已登记开机启动");
+            }
+            else if (key.GetValue(valueName) is not null)
+            {
+                key.DeleteValue(valueName, throwOnMissingValue: false);
+                AppLog.Write("autostart: 已取消开机启动");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("autostart failed: " + ex.Message);
+        }
     }
 
     /// <summary>在指定屏幕坐标弹出托盘菜单（自绘圆角弹窗）。</summary>

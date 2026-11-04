@@ -25,6 +25,13 @@ def get_default_config():
         "admin": {
             "username": "",
             "password": ""
+        },
+        "backup": {
+            "interval_hours": 24,
+            "keep": 10
+        },
+        "desktop": {
+            "autostart": False
         }
     }
 
