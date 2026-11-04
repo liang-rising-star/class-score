@@ -8,7 +8,9 @@
     <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
-    {% include "_header.html" %}
+    <div class="app-shell">
+        {% set active_page = 'index' %}
+        {% include "_sidebar.html" %}
 
     <main class="page">
         <div class="page-head">
@@ -17,7 +19,7 @@
         </div>
 
         <div class="tile-grid">
-            <a class="tile" href="/generate">
+            <a draggable="false" class="tile" href="/generate">
                 <div class="tile-icon">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -30,7 +32,7 @@
                 <span class="tile-cta">开始生成 →</span>
             </a>
 
-            <a class="tile" href="/verify">
+            <a draggable="false" class="tile" href="/verify">
                 <div class="tile-icon is-green">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -39,10 +41,12 @@
                     </svg>
                 </div>
                 <h2>核销积分</h2>
-                <p>扫码枪 / 摄像头 / 手动录入，实时校验真伪并累计本次核销总额。</p>
+                <p>扫码枪或手动录入编号，实时校验真伪并累计本次核销总额。</p>
                 <span class="tile-cta">去核销 →</span>
             </a>
         </div>
     </main>
+
+    </div>
 </body>
 </html>

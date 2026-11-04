@@ -166,7 +166,7 @@ def get_default_config():
     """返回默认配置，init_required=True，确保首次启动走管理员设置流程"""
     return {
         "system": {
-            "name": "班级积分防伪核销管理系统",
+            "name": "班级积分管理系统",
             "init_required": True,
             "encryption_salt": secrets.token_hex(16)
         },
@@ -261,8 +261,13 @@ def init_db():
         code TEXT UNIQUE NOT NULL,
         hash TEXT UNIQUE NOT NULL,
         issue_date TEXT NOT NULL,
-        status TEXT DEFAULT '未使用'
+        status TEXT DEFAULT '未使用',
+        verified_at TEXT
     )''')
+    # 兼容 v2/v3.0 老库：补核销时间列（可空、幂等，不动已有数据）
+    columns = {row[1] for row in cursor.execute("PRAGMA table_info(scores)")}
+    if "verified_at" not in columns:
+        cursor.execute("ALTER TABLE scores ADD COLUMN verified_at TEXT")
     conn.commit()
     conn.close()
 
@@ -625,7 +630,14 @@ async def submit_init_admin(request: Request, username: str = Form(...), passwor
     config["admin"]["password"] = hash_password(password)
     config["system"]["init_required"] = False
     write_config(config)
-    return RedirectResponse(url="/login", status_code=303)
+
+    # 初始化完成直接建立会话进入控制台，不再要求重新登录一次
+    session_id = secrets.token_hex(32)
+    sessions[session_id] = {"user": username, "expires": time.time() + SESSION_TTL}
+    response = RedirectResponse(url="/index", status_code=303)
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                        secure=_is_https(request), max_age=SESSION_TTL)
+    return response
 
 # 登录页面
 @app.get("/login", response_class=HTMLResponse)
@@ -817,6 +829,7 @@ async def submit_verify(request: Request, codes: str = Form(None), csrf_token: s
 
     results = []
     total_amount = 0
+    verified_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     conn = connect_db()
     try:
@@ -827,21 +840,28 @@ async def submit_verify(request: Request, codes: str = Form(None), csrf_token: s
 
             if not score:
                 results.append({"index": i, "code": code, "amount": 0,
-                                "status": "错误", "message": "伪造编码"})
+                                "status": "错误", "message": "伪造编码",
+                                "verified_at": None, "time_text": ""})
                 continue
 
             # 条件更新 + rowcount 判定：并发/重复提交时只有一次能成功，杜绝一卡多花
             cur = conn.execute(
-                "UPDATE scores SET status = '已作废' WHERE code = ? AND status = '未使用'",
-                (score["code"],)
+                "UPDATE scores SET status = '已作废', verified_at = ?"
+                " WHERE code = ? AND status = '未使用'",
+                (verified_now, score["code"])
             )
             if cur.rowcount == 1:
                 results.append({"index": i, "code": code, "amount": score["amount"],
-                                "status": "成功", "message": "核销成功"})
+                                "status": "成功", "message": "核销成功",
+                                "verified_at": verified_now, "time_text": verified_now})
                 total_amount += score["amount"]
             else:
+                # 已核销的卡：回显当初的核销时间（早于该字段的老数据标记为「未记录」）
+                redeemed_at = score["verified_at"]
                 results.append({"index": i, "code": code, "amount": score["amount"],
-                                "status": "错误", "message": "已核销编码"})
+                                "status": "错误", "message": "已核销编码",
+                                "verified_at": redeemed_at,
+                                "time_text": redeemed_at or "未记录"})
         conn.commit()
     finally:
         conn.close()
@@ -886,6 +906,7 @@ async def setting(request: Request):
         "system_name": system_name,
         "success": result == "success",
         "wrong_password": result == "wrong_password",
+        "reset_wrong_password": result == "reset_wrong_password",
         "message": "新密码至少需要 4 位" if result == "weak" else None,
     })
 
@@ -946,7 +967,7 @@ async def reset_system(request: Request, reset_password: str = Form(...), csrf_t
     config = read_config()
     ok, _ = verify_password(reset_password or "", config["admin"]["password"])
     if not ok:
-        sess["setting"] = "wrong_password"
+        sess["setting"] = "reset_wrong_password"
         return RedirectResponse(url="/setting", status_code=303)
     do_reset()
     return RedirectResponse(url="/", status_code=303)

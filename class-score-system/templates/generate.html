@@ -8,7 +8,9 @@
     <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
-    {% include "_header.html" %}
+    <div class="app-shell">
+        {% set active_page = 'generate' %}
+        {% include "_sidebar.html" %}
 
     <main class="page">
         <div class="page-head">
@@ -73,12 +75,14 @@
                 </h3>
                 <p>已生成 {{ quantity }} 张积分卡并导出 Word 文档</p>
                 <div class="form-actions">
-                    <a href="/download/{{ filename }}" class="btn btn-success">下载 Word 文档</a>
+                    <a href="/download/{{ filename }}" class="btn btn-success">保存 Word 文档</a>
                     <span class="file-chip">{{ filename }}</span>
                 </div>
             </div>
             {% endif %}
         </div>
     </main>
+
+    </div>
 </body>
 </html>

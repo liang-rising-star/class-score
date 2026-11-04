@@ -9,7 +9,7 @@
 
 #define MyAppName "class-score"
 #define MyAppVersion "3.0"
-#define MyAppFullName "班级积分防伪核销管理系统"
+#define MyAppFullName "班级积分管理系统"
 #define MyAppPublisher "liang-rising-star"
 #define MyAppURL "https://github.com/liang-rising-star/class-score"
 #define MyAppExeName "run.exe"

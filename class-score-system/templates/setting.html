@@ -8,7 +8,9 @@
     <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
-    {% include "_header.html" %}
+    <div class="app-shell">
+        {% set active_page = 'setting' %}
+        {% include "_sidebar.html" %}
 
     <main class="page">
         <div class="page-head">
@@ -66,19 +68,85 @@
                 危险操作
             </h3>
             <p>恢复出厂设置将清除所有积分数据、导出文件和管理员账号，系统将回到初始状态。此操作不可撤销。</p>
-            <form action="/reset" method="post"
-                  onsubmit="return confirm('确定要恢复出厂设置吗？所有数据将被清除，此操作不可撤销！')">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="field">
-                    <label for="reset_password">请输入当前密码以确认操作</label>
-                    <input type="password" id="reset_password" name="reset_password" required
-                           placeholder="输入当前密码" autocomplete="current-password">
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-danger">恢复出厂设置</button>
-                </div>
-            </form>
+            <div class="form-actions">
+                <button type="button" id="openReset" class="btn btn-danger">恢复出厂设置</button>
+            </div>
         </div>
     </main>
+
+    </div>
+
+<!-- 恢复出厂设置：输入密码确认 -->
+<dialog id="resetDialog" class="modal" aria-labelledby="resetTitle"
+        {% if reset_wrong_password %}data-autoshow="1"{% endif %}>
+    <form action="/reset" method="post" class="modal__body">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="modal__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 9v4M12 17h.01"></path>
+                <path d="M10.3 3.9 2.4 17a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"></path>
+            </svg>
+        </div>
+        <h3 class="modal__title" id="resetTitle">恢复到出厂设置？</h3>
+        <p class="modal__text">
+            将清除全部积分记录、导出的 Word 文件和管理员账号，系统回到初始状态。<strong>此操作不可撤销。</strong>
+        </p>
+
+        {% if reset_wrong_password %}
+        <div class="alert alert-error" style="margin-bottom:16px">当前密码错误，请重新输入</div>
+        {% endif %}
+
+        <div class="field">
+            <label for="reset_password">输入当前密码以确认</label>
+            <input type="password" id="reset_password" name="reset_password" required
+                   autocomplete="current-password" placeholder="当前登录密码">
+        </div>
+
+        <div class="modal__actions">
+            <button type="button" id="resetCancel" class="btn btn-ghost">取消</button>
+            <button type="submit" class="btn btn-danger">确认重置</button>
+        </div>
+    </form>
+</dialog>
+
+<script>
+(function() {
+    var openBtn = document.getElementById('openReset');
+    var dialog = document.getElementById('resetDialog');
+    if (!openBtn || !dialog) return;
+
+    var pwd = dialog.querySelector('input[type="password"]');
+
+    // 上一次失败留下的错误提示只在自动重开时显示；用户主动打开时先清掉
+    function clearError() {
+        var err = dialog.querySelector('.alert');
+        if (err) err.remove();
+        delete dialog.dataset.autoshow;
+    }
+
+    function open(keepError) {
+        if (!keepError) clearError();
+        if (typeof dialog.showModal === 'function') {
+            dialog.showModal();
+            if (pwd) { pwd.focus(); pwd.select(); }
+        }
+    }
+
+    openBtn.addEventListener('click', function() { open(false); });
+
+    document.getElementById('resetCancel').addEventListener('click', function() {
+        dialog.close();
+    });
+
+    // 点遮罩空白处 = 取消
+    dialog.addEventListener('click', function(e) {
+        if (e.target === dialog) dialog.close();
+    });
+
+    // 密码输错被服务端打回时，自动重新打开弹窗（保留错误提示）
+    if (dialog.dataset.autoshow === '1') open(true);
+})();
+</script>
 </body>
 </html>

@@ -20,6 +20,8 @@ class-score-system/python/
 build/
 dist/
 *.spec
+desktop/bin/
+desktop/obj/
 
 # 编辑器与系统文件
 .vscode/

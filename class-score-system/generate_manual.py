@@ -118,7 +118,7 @@ def add_warning(text):
 # ========== 正文内容 ==========
 
 # 封面
-add_title("班级积分防伪核销管理系统")
+add_title("班级积分管理系统")
 add_subtitle("用户操作手册")
 p = doc.add_paragraph()
 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -134,7 +134,7 @@ doc.add_heading("一、系统概述", level=1)
 
 doc.add_heading("1.1 系统简介", level=2)
 doc.add_paragraph(
-    "班级积分防伪核销管理系统是一款面向学校、培训机构等场景的积分管理工具。"
+    "班级积分管理系统是一款面向学校、培训机构等场景的积分管理工具。"
     "系统支持批量生成带有防伪条码的积分卡、导出Word文档打印，以及对积分卡进行扫码核销验证。"
     "每张积分卡包含唯一的10位编号和Code128条码，可有效防止伪造和重复使用。"
 )
@@ -331,7 +331,7 @@ doc.add_paragraph("3. 打开 config.json，将内容替换为：")
 p = doc.add_paragraph()
 config_text = '''{
   "system": {
-    "name": "班级积分防伪核销管理系统",
+    "name": "班级积分管理系统",
     "init_required": true,
     "encryption_salt": "这里换成随机32位字符串"
   },

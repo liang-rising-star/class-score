@@ -14,7 +14,7 @@ def get_default_config():
     """返回默认配置，init_required=True"""
     return {
         "system": {
-            "name": "班级积分防伪核销管理系统",
+            "name": "班级积分管理系统",
             "init_required": True,
             "encryption_salt": secrets.token_hex(16)
         },
