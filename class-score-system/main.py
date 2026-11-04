@@ -404,20 +404,60 @@ def clean_junk():
     return removed, freed
 
 
+_dpi_ready = False
+
+
+def _enable_dpi_awareness():
+    """让 Tk 对话框按真实 DPI 渲染，否则 150% 缩放下会被系统位图放大而发糊。"""
+    global _dpi_ready
+    if _dpi_ready or os.name != "nt":
+        return
+    _dpi_ready = True
+    try:
+        import ctypes
+        try:
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)   # Per-Monitor V2
+            return
+        except Exception:
+            pass
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)           # Per-Monitor
+            return
+        except Exception:
+            pass
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
 def pick_folder(title="选择文件夹"):
-    """在服务器本机弹出系统文件夹选择框（本机部署时即用户自己的桌面）。"""
+    """弹出系统文件夹选择框。
+
+    返回：
+      - 选中路径（str）
+      - ""   用户主动取消
+      - None 对话框打不开（环境问题）
+    """
+    _enable_dpi_awareness()
     try:
         import tkinter as tk
         from tkinter import filedialog
 
         root = tk.Tk()
         root.withdraw()
+        try:
+            icon = os.path.join(BASE_DIR, "logo.ico")
+            if os.path.exists(icon):
+                root.iconbitmap(icon)
+        except Exception:
+            pass
         root.attributes("-topmost", True)
-        path = filedialog.askdirectory(title=title, mustexist=True)
+        root.update()
+        path = filedialog.askdirectory(title=title, mustexist=True, parent=root)
         root.destroy()
-        return path or None
     except Exception:
         return None
+    return path or ""
 
 
 def find_legacy_databases(folder, max_depth=4):
@@ -903,9 +943,16 @@ def import_legacy(request: Request, legacy_path: str = Form(None),
 
     folder = (legacy_path or "").strip().strip('"')
     if not folder:
-        folder = pick_folder("选择旧版程序安装目录") or ""
-    if not folder or not os.path.isdir(folder):
-        return finish("error", "未选择有效的文件夹")
+        picked = pick_folder("选择旧版程序安装目录")
+        if picked is None:
+            return finish("error", "打不开文件夹选择框，请在桌面版中使用该功能")
+        if picked == "":
+            # 用户点了取消：按原路返回，不做任何提示
+            return RedirectResponse(url=target, status_code=303)
+        folder = picked
+
+    if not os.path.isdir(folder):
+        return finish("error", f"路径不存在：{folder}")
 
     candidates = find_legacy_databases(folder)
     if not candidates:

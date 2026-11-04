@@ -93,9 +93,10 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <button type="submit" class="btn btn-ghost">打开备份文件夹</button>
                 </form>
-                <form action="/import_legacy" method="post">
+                <form action="/import_legacy" method="post" id="legacyForm">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button type="submit" class="btn btn-ghost">导入 2.x 旧库</button>
+                    <input type="hidden" name="legacy_path" id="legacy_path" value="">
+                    <button type="button" id="importLegacyBtn" class="btn btn-ghost">导入 2.x 旧库</button>
                 </form>
             </div>
         </div>
@@ -335,6 +336,32 @@
     document.getElementById('cleanCancel').addEventListener('click', function () { dlg.close(); });
     dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
 })();
+
+<script>
+// 桌面版里用原生文件夹选择框（DPI 正常、带本程序图标）；网页版回退到服务端对话框
+(function() {
+    var btn = document.getElementById('importLegacyBtn');
+    var form = document.getElementById('legacyForm');
+    var input = document.getElementById('legacy_path');
+    if (!btn || !form || !input) return;
+
+    function submitWith(path) {
+        input.value = path || '';
+        form.submit();
+    }
+
+    btn.addEventListener('click', function() {
+        var bridge = window.chrome && window.chrome.webview && window.chrome.webview.hostObjects
+            ? window.chrome.webview.hostObjects.desktopBridge : null;
+        if (!bridge) { submitWith(''); return; }          // 网页版：交给服务端弹框
+
+        bridge.PickFolder('选择旧版程序安装目录').then(function(path) {
+            if (!path) return;                            // 用户取消：什么都不做
+            submitWith(path);
+        }).catch(function() { submitWith(''); });
+    });
+})();
 </script>
+
 </body>
 </html>

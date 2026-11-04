@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
@@ -619,6 +620,17 @@ internal sealed class MainForm : Form
             // 下载（导出 Word）走系统“另存为”，由用户选位置，避免默认目录不可写时报错
             _web.CoreWebView2.DownloadStarting += (_, e) => ShowSaveDialog(e);
 
+            // 页面里的“选择旧版安装目录”调用原生对话框（DPI 正常、带本程序图标）
+            try
+            {
+                _web.CoreWebView2.AddHostObjectToScript("desktopBridge", new DesktopBridge(this));
+                AppLog.Write("host bridge registered");
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("host bridge failed: " + ex.Message);
+            }
+
             _web.Source = new Uri(_url);
         }
         catch (Exception ex)
@@ -631,6 +643,48 @@ internal sealed class MainForm : Form
     }
 
     public void Reload() => _web.CoreWebView2?.Reload();
+}
+
+/// <summary>暴露给网页脚本的桥：目前只提供原生文件夹选择。</summary>
+[ComVisible(true)]
+[ClassInterface(ClassInterfaceType.AutoDual)]
+public class DesktopBridge
+{
+    private readonly Form _owner;
+
+    public DesktopBridge(Form owner) => _owner = owner;
+
+    /// <summary>弹出系统文件夹选择框；返回选中路径，取消返回空串。</summary>
+    public string PickFolder(string title)
+    {
+        var result = "";
+
+        void ShowDialog()
+        {
+            using var dialog = new FolderBrowserDialog
+            {
+                Description = string.IsNullOrWhiteSpace(title) ? "选择文件夹" : title,
+                UseDescriptionForTitle = true,
+                ShowNewFolderButton = true
+            };
+            if (dialog.ShowDialog(_owner) == DialogResult.OK)
+            {
+                result = dialog.SelectedPath;
+            }
+        }
+
+        try
+        {
+            if (_owner.InvokeRequired) _owner.Invoke((Action)ShowDialog);
+            else ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("PickFolder failed: " + ex.Message);
+        }
+
+        return result;
+    }
 }
 
 /// <summary>极简文件日志：%LOCALAPPDATA%\ClassScore-Desktop\desktop.log</summary>
