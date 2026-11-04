@@ -103,7 +103,7 @@
                     <circle cx="12" cy="12" r="9"></circle>
                     <path d="M12 7v5l3 2"></path>
                 </svg>
-                自动备份与启动
+                自动备份
             </div>
             <p class="card-sub">定时把数据库备份到 data/backups，超出保留份数自动删除最旧的</p>
 
@@ -123,13 +123,33 @@
                         <div class="field-hint">超出的旧备份会自动删除</div>
                     </div>
                 </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn">保存设置</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="12" rx="2"></rect>
+                    <path d="M8 20h8M12 16v4"></path>
+                </svg>
+                桌面应用
+            </div>
+            <p class="card-sub">仅在桌面版（托盘常驻）下生效，网页版不受影响</p>
+
+            <form action="/desktop/autostart" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <label class="switch-row">
                     <input type="checkbox" name="autostart" {% if autostart %}checked{% endif %}>
-                    <span>开机自动启动桌面版（下次启动桌面版时生效）</span>
+                    <span>开机自动启动桌面版</span>
                 </label>
                 <div class="form-actions">
                     <button type="submit" class="btn">保存设置</button>
                 </div>
+                <p class="field-hint">勾选后，下次启动桌面版会把本程序登记到当前用户的启动项</p>
             </form>
         </div>
 

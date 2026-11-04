@@ -1083,6 +1083,10 @@ async def setting(request: Request):
     notice = sess.pop("notice", None)
 
     backup_cfg = config.get("backup", {}) or {}
+    try:
+        interval_value = int(round(float(backup_cfg.get("interval_hours", 24) or 0)))
+    except (TypeError, ValueError):
+        interval_value = 24
     out_count, out_size = output_stats()
     junk_count, junk_size = junk_stats()
 
@@ -1096,7 +1100,7 @@ async def setting(request: Request):
         "backup_count": len(list_backups()),
         "last_backup": last_backup_time(),
         "backup_dir": get_backup_dir(),
-        "interval_hours": backup_cfg.get("interval_hours", 24),
+        "interval_hours": interval_value,
         "backup_keep": backup_cfg.get("keep", 10),
         "autostart": bool((config.get("desktop") or {}).get("autostart", False)),
         "cache_count": out_count,
@@ -1192,9 +1196,8 @@ async def backup_open(request: Request, csrf_token: str = Form(None)):
 
 
 @app.post("/backup/settings")
-async def backup_settings(request: Request, interval_hours: float = Form(24),
-                          keep: int = Form(10), autostart: str = Form(None),
-                          csrf_token: str = Form(None)):
+async def backup_settings(request: Request, interval_hours: int = Form(24),
+                          keep: int = Form(10), csrf_token: str = Form(None)):
     check_csrf(request, csrf_token)
     sid, sess = get_session(request)
     if not sess:
@@ -1211,14 +1214,30 @@ async def backup_settings(request: Request, interval_hours: float = Form(24),
     config.setdefault("backup", {})
     config["backup"]["interval_hours"] = interval_hours
     config["backup"]["keep"] = keep
-    config.setdefault("desktop", {})
-    config["desktop"]["autostart"] = bool(autostart)
     write_config(config)
 
-    tip = "设置已保存"
-    if bool(autostart):
-        tip += "；开机自启将在下次启动桌面版时生效"
-    sess["notice"] = {"kind": "success", "text": tip}
+    sess["notice"] = {"kind": "success", "text": "备份设置已保存"}
+    return RedirectResponse(url="/setting", status_code=303)
+
+
+@app.post("/desktop/autostart")
+async def desktop_autostart(request: Request, autostart: str = Form(None),
+                            csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    enabled = bool(autostart)
+    config = read_config()
+    config.setdefault("desktop", {})
+    config["desktop"]["autostart"] = enabled
+    write_config(config)
+
+    sess["notice"] = {
+        "kind": "success",
+        "text": "已开启开机自启，下次启动桌面版时生效" if enabled else "已关闭开机自启",
+    }
     return RedirectResponse(url="/setting", status_code=303)
 
 
