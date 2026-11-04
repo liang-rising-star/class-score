@@ -65,6 +65,9 @@
 
             {% if success %}
             <div class="success-panel">
+                {% if notice %}
+                <div class="alert alert-{{ 'success' if notice.kind == 'success' else 'error' }}">{{ notice.text }}</div>
+                {% endif %}
                 <h3>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -75,6 +78,11 @@
                 <p>已生成 {{ quantity }} 张积分卡并导出 Word 文档</p>
                 <div class="form-actions">
                     <a href="/download/{{ filename }}" class="btn btn-success">保存 Word 文档</a>
+                    <form action="/print" method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="filename" value="{{ filename }}">
+                        <button type="submit" class="btn btn-ghost">直接打印</button>
+                    </form>
                     <span class="file-chip">{{ filename }}</span>
                 </div>
             </div>

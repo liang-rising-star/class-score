@@ -1145,15 +1145,17 @@ async def generate_result(request: Request):
     sid, sess = get_session(request)
     if not sess:
         return RedirectResponse(url="/login")
-    result = sess.pop("gen", None)
+    result = sess.get("gen")
     if not result:
         return RedirectResponse(url="/generate")
+    notice = sess.pop("gen_notice", None)
     return render(request, "generate.html", {
         "system_name": result["system_name"],
         "success": True,
         "filepath": result["filepath"],
         "filename": result["filename"],
         "quantity": result["quantity"],
+        "notice": notice,
     })
 
 # 核销页面
@@ -1471,6 +1473,38 @@ async def reset_system(request: Request, reset_password: str = Form(...), csrf_t
         return RedirectResponse(url="/setting", status_code=303)
     do_reset()
     return RedirectResponse(url="/", status_code=303)
+
+
+# 直接调用系统打印（默认打印机），交给关联程序（Word / WPS）处理
+@app.post("/print")
+async def print_document(request: Request, filename: str = Form(...),
+                         csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    target = "/generate_result" if sess.get("gen") else "/generate"
+
+    name = os.path.basename(filename.replace("\\", "/"))
+    output_dir = get_output_dir()
+    filepath = os.path.realpath(os.path.join(output_dir, name))
+    try:
+        inside = os.path.commonpath([filepath, output_dir]) == output_dir
+    except ValueError:
+        inside = False
+
+    if not name or not name.lower().endswith(".docx") or not inside or not os.path.isfile(filepath):
+        sess["gen_notice"] = {"kind": "error", "text": "找不到要打印的文件"}
+        return RedirectResponse(url=target, status_code=303)
+
+    try:
+        os.startfile(filepath, "print")      # Windows：用默认关联程序直接打印
+        sess["gen_notice"] = {"kind": "success", "text": f"已发送到默认打印机：{name}"}
+    except Exception as exc:
+        sess["gen_notice"] = {"kind": "error", "text": f"无法调用打印机：{exc}"}
+
+    return RedirectResponse(url=target, status_code=303)
 
 
 # 导出目录绝对路径
