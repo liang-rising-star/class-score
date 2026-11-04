@@ -1,11 +1,8 @@
-FROM python:3.12-slim
-
-# 安装系统依赖（libzbar0 用于条码识别）
-RUN apt-get update && apt-get install -y --no-install-recommends libzbar0 && rm -rf /var/lib/apt/lists/*
+FROM wsxxstar/class-score
 
 WORKDIR /app
 
-# 安装Python依赖
+# 安装Python依赖（如果有更新）
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -15,9 +12,10 @@ COPY run.py .
 COPY templates/ ./templates/
 COPY static/ ./static/
 COPY entrypoint.sh .
+COPY logo.ico .
 RUN chmod +x entrypoint.sh
 
-# 创建数据目录
+# 确保数据目录存在
 RUN mkdir -p /app/data/db /app/data/output
 
 EXPOSE 8000

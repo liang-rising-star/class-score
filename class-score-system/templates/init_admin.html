@@ -3,81 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>管理员初始化</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f8f9fa;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
-        .container {
-            background-color: white;
-            padding: 40px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            width: 100%;
-            max-width: 400px;
-        }
-        h1 {
-            text-align: center;
-            margin-bottom: 30px;
-            color: #333;
-            font-size: 24px;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            margin-bottom: 8px;
-            color: #555;
-            font-weight: 500;
-        }
-        input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 16px;
-        }
-        button {
-            width: 100%;
-            padding: 12px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-        button:hover {
-            background-color: #0069d9;
-        }
-    </style>
+    <link rel="icon" href="/logo.ico" type="image/x-icon">
+    <title>初始化管理员</title>
+    <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
-    <div class="container">
-        <h1>管理员初始化</h1>
-        <form action="/init_admin" method="post">
-            <div class="form-group">
-                <label for="username">用户名</label>
-                <input type="text" id="username" name="username" required>
+    <div class="auth-page">
+        <div class="auth-card">
+            <div class="auth-head">
+                <img class="auth-logo" src="/logo.ico" alt="">
+                <h1 class="auth-title">管理员初始化</h1>
+                <p class="auth-sub">首次启动，请设置管理账号</p>
             </div>
-            <div class="form-group">
-                <label for="password">密码</label>
-                <input type="password" id="password" name="password" required>
-            </div>
-            <button type="submit">设置</button>
-        </form>
+
+            {% if error %}
+            <div class="alert alert-error">{{ error }}</div>
+            {% endif %}
+
+            <form action="/init_admin" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="field">
+                    <label for="username">用户名</label>
+                    <input type="text" id="username" name="username" required maxlength="32"
+                           autocomplete="username" placeholder="例如 admin">
+                </div>
+                <div class="field">
+                    <label for="password">密码</label>
+                    <input type="password" id="password" name="password" required minlength="4"
+                           autocomplete="new-password" placeholder="至少 4 位">
+                    <div class="field-hint">密码以 PBKDF2 加盐哈希保存，不存明文</div>
+                </div>
+                <button type="submit" class="btn btn-block">创建管理员</button>
+            </form>
+
+            <div class="auth-foot">{{ system_name }} · 仅首次启动需要设置</div>
+        </div>
     </div>
 </body>
 </html>

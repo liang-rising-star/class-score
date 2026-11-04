@@ -13,6 +13,7 @@
 </div>
 
 ---
+>  **了解使用方式，请跳过此处，往下翻**
 
 ## 📋 项目简介
 
@@ -24,6 +25,8 @@
 - 📦 **批量生成** — 一键批量生成积分卡，自动导出排版精美的 A4 Word 文档
 - 🔍 **快速核销** — 支持扫描条码或手动输入编号核销，一次提交多个编码
 - 🏷️ **Code128 条码** — 兼容所有标准条码扫描枪，即扫即核
+- 📷 **摄像头扫码** — 2.0版本新增，支持摄像头实时扫码（建议使用高清摄像头）
+- 🌐 **局域网适配** — HTTP连接仅支持拍照识别模式，建议使用扫码枪获得最佳体验
 - 🛡️ **盐值轮转** — 恢复出厂设置时自动重新生成加密盐，使所有旧卡失效
 - 🚀 **零外部依赖** — 内置 SQLite 数据库，无需额外安装数据库服务
 - 🐳 **Docker 一键部署** — 一行命令启动，数据自动持久化
@@ -38,6 +41,7 @@
 | 版本标签 | 架构 | 说明 |
 |:---:|:---:|:---|
 | `latest` | x86 | 最新版本 |
+| `2.0` | x86 | 稳定版本 2.0 |
 | `1.0` | x86 | 稳定版本 1.0 |
 | - | ARM | 暂未构建（后续有计划） |
 
@@ -63,7 +67,7 @@ services:
 ```
 
 ### 方式二：本地运行
-
+#### 使用本机Python运行服务
 ```bash
 cd class-score-system
 
@@ -74,13 +78,54 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Windows 用户可直接双击 `启动.bat`（内置 Python 运行时，无需安装 Python）。
+Windows 用户可直接双击 `启动.bat` 或 `run.exe`（内置 Python 运行时，无需安装 Python）。
 
-### 访问系统
+> ⚠️ **关于内置 Python 运行时**：`class-score-system/python/`（约 430MB）不纳入版本管理。
+> 从仓库克隆后，需要把 [Python 3.14 Windows embeddable 包](https://www.python.org/downloads/windows/)
+> 解压到 `class-score-system/python/`，再用 [get-pip.py](https://bootstrap.pypa.io/get-pip.py) 装好 pip
+> 并执行 `python\python.exe -m pip install -r requirements.txt`；或者干脆用本机 Python 运行（见上一节）。
+> 用 PyInstaller / Inno Setup 打便携包时，这个目录必须存在。
 
-访问 `http://localhost:8000`，首次使用将引导设置管理员账号。
+#### 使用软件包内置 Python 运行时
 
-**数据持久化：**
+如果使用内置 Python 运行时，可通过以下指令自定义端口：
+
+```bash
+# 切换到 class-score-system 目录
+cd class-score-system
+
+# 使用内置 Python 运行时并指定端口（例如 8080）
+./python/python.exe run.py --port 8080
+```
+
+#### 修改运行.bat
+
+要修改 `启动.bat` 文件以使用自定义端口，可按照以下步骤操作：
+
+1. 用文本编辑器打开 `启动.bat` 文件
+2. 修改其中的端口参数，例如：
+   ```batch
+   @echo off
+   cd class-score-system
+   .\python\python.exe run.py --port 8080
+   pause
+   ```
+3. 保存文件后双击运行，服务将在指定端口启动
+
+## ⚠️ 注意事项
+
+### 服务启动
+- 启动后会弹出命令行窗口，**请勿关闭**，关闭后服务将停止运行
+- 服务默认运行在 `8000` 端口，请确保该端口未被占用（已被占用？请参考前文自定义端口方法）
+
+### 访问方式
+- 在本机浏览器中访问：`http://localhost:8000` 或 `http://127.0.0.1:8000`
+- 在局域网其他设备上访问：`http://[此电脑的IP地址]:8000`
+- 首次访问将引导设置管理员账号
+
+### 数据持久化
+
+所有数据都存储在 `data/` 目录中：
 
 ```
 data/
@@ -90,14 +135,15 @@ data/
 └── output/          # 导出的 Word 文档
 ```
 
-> 💡 配置文件丢失？不用担心，系统会自动重建默认配置并重新引导管理员设置。
+> 💡 **配置文件丢失**：不用担心，系统会自动重建默认配置并重新引导管理员设置
+> 💡 **数据备份**：建议定期备份 `data/` 目录，以防止数据丢失
 
 ## 🖼️ 界面预览
 
 | 生成积分卡 | 核销积分卡 |
 |:---:|:---:|
 | 填写班级、标题、面额、数量 → 一键生成并下载 Word | 输入/扫描条码 → 实时显示核销结果与总额 |
-| 2 列 × 5 行 排版，每张卡含条码 + 编号 | ✅ 核销成功 / ❌ 伪造编码 / ❌ 已核销 |
+| 3 列 × 7 行 排版，每张卡含条码 + 编号 | ✅ 核销成功 / ❌ 伪造编码 / ❌ 已核销 |
 
 ## 📖 使用说明
 
@@ -156,6 +202,9 @@ class-score-system/
 │   ├── verify.html      # 核销积分页
 │   └── setting.html     # 设置页
 ├── static/              # 静态资源
+│   ├── css/app.css      # 统一设计系统（颜色/圆角/阴影变量 + 组件样式）
+│   └── html5-qrcode.min.js  # 本地化扫码库（离线可用）
+├── python/              # 内嵌 Python 运行时（不入库，见「方式二」说明）
 └── data/                # 运行时数据（自动生成）
     ├── config.json
     ├── db/scores.db
@@ -166,11 +215,14 @@ class-score-system/
 
 | 机制 | 说明 |
 |:---|:---|
-| 双重编码 | 10 位短编号（条码/人工录入）+ SHA-256 哈希（防伪校验）|
+| 双重编码 | 10 位短编号（条码/人工录入）+ SHA-256 哈希（保留列，供后续签名校验）|
 | 安装盐 | 每个实例独立加密盐，重置后旧卡全部失效 |
-| 会话管理 | 64 字符随机 Session ID + HTTP-only Cookie |
-| 文件保护 | 中间件拦截敏感路径（`/config.json`、`/data/` 等）|
-| 表单防重 | POST-Redirect-GET 模式，杜绝刷新重复提交 |
+| 口令存储 | PBKDF2-SHA256（20 万轮加盐），旧版明文口令登录时自动升级 |
+| 会话管理 | 64 字符随机 Session ID + HTTP-only Cookie，空闲 8 小时过期 |
+| CSRF | 双提交令牌，所有 POST 表单校验，缺失即 403 |
+| 登录节流 | 同一 IP 连续 5 次失败锁定 5 分钟 |
+| 核销防双花 | 条件更新（`WHERE status='未使用'`）+ rowcount 判定，同一张卡只能核销一次 |
+| 文件保护 | 中间件拦截敏感路径；下载仅限导出目录内的 `.docx`，拒绝路径穿越 |
 
 ## 🗃️ 数据库结构
 
@@ -198,21 +250,19 @@ CREATE TABLE scores (
     "init_required": true,
     "encryption_salt": "<自动生成的32位hex>"
   },
-  "printing": {
-    "page_size": "A4",
-    "rows_per_page": 5,
-    "columns_per_page": 2
-  },
   "paths": {
     "database": "./data/db/scores.db",
     "output": "./data/output"
   },
   "admin": {
     "username": "",
-    "password": ""
+    "password": "<PBKDF2 哈希；旧版明文会在首次登录后自动升级>"
   }
 }
 ```
+
+> 打印版式（列数/行数/行高）是 `main.py` 顶部的 `CARD_*` 常量，不再放在配置里 ——
+> 旧的 `printing` 段已废弃，保留也不会生效。
 
 ## 📄 开源协议
 

@@ -18,11 +18,6 @@ def get_default_config():
             "init_required": True,
             "encryption_salt": secrets.token_hex(16)
         },
-        "printing": {
-            "page_size": "A4",
-            "rows_per_page": 5,
-            "columns_per_page": 2
-        },
         "paths": {
             "database": "./data/db/scores.db",
             "output": "./data/output"
