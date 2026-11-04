@@ -1,0 +1,610 @@
+using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
+
+namespace ClassScore.Desktop;
+
+internal static class Program
+{
+    /// <summary>命令行传入的项目根目录（可选）：--root "D:\class-score"</summary>
+    public static string? RootOverride { get; private set; }
+
+    [STAThread]
+    private static void Main(string[] args)
+    {
+        // 必须最先设置：让进程按显示器 DPI 渲染，否则 150% 缩放下整个窗口被位图拉伸而发糊
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] is "--root" or "-r") RootOverride = args[i + 1];
+        }
+
+        try
+        {
+            using var context = new TrayApplicationContext();
+
+            if (args.Contains("--preview-menu"))
+            {
+                var timer = new System.Windows.Forms.Timer { Interval = 1500 };
+                timer.Tick += (_, _) =>
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                    context.ShowTrayMenuPreview();
+                };
+                timer.Start();
+            }
+
+            Application.Run(context);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "班级积分管理系统", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+}
+
+/// <summary>托盘宿主：负责起后端、开 WebView2 窗口、提供托盘右键菜单。</summary>
+internal sealed class TrayApplicationContext : ApplicationContext
+{
+    private readonly BackendServer _server;
+    private readonly MainForm _form;
+    private readonly NotifyIcon _tray;
+    private readonly string _launchArgs;
+    private bool _exiting;
+
+    public TrayApplicationContext()
+    {
+        var root = AppPaths.FindProjectRoot()
+                   ?? throw new InvalidOperationException(
+                       "未找到程序目录。请把本程序放在 class-score 根目录下（与 class-score-system 同级）。");
+
+        // 只保留 --root 之后的参数，重启时原样传给新进程
+        var all = Environment.GetCommandLineArgs().Skip(1)
+            .Where(a => a is not "--preview-menu" and not "--test-restart")
+            .ToArray();
+        _launchArgs = string.Join(" ", all.Select(Quote));
+
+        _server = new BackendServer(root);
+        var url = _server.Start();
+
+        _form = new MainForm(url, AppPaths.LoadIcon(root));
+        _form.FormClosing += OnFormClosing;
+
+        _tray = new NotifyIcon
+        {
+            Icon = AppPaths.LoadIcon(root),
+            Text = "班级积分管理系统",
+            Visible = true
+        };
+        _tray.DoubleClick += (_, _) => ShowMainWindow();
+        _tray.MouseUp += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Right) ShowTrayMenu(Cursor.Position);
+        };
+
+        ShowMainWindow();
+    }
+
+    /// <summary>在指定屏幕坐标弹出托盘菜单（自绘圆角弹窗）。</summary>
+    private void ShowTrayMenu(Point screenPoint)
+    {
+        var menu = new TrayMenu();
+        menu.OpenRequested += ShowMainWindow;
+        menu.RestartRequested += RestartApplication;
+        menu.ExitRequested += ExitApplication;
+
+        var area = Screen.FromPoint(screenPoint).WorkingArea;
+        var x = Math.Min(screenPoint.X, area.Right - menu.Width - 8);
+        var y = Math.Min(screenPoint.Y, area.Bottom - menu.Height - 8);
+        menu.StartPosition = FormStartPosition.Manual;
+        menu.Location = new Point(
+            Math.Max(area.Left + 8, x),
+            Math.Max(area.Top + 8, y));
+        menu.Show();
+    }
+
+    /// <summary>调试用：把托盘菜单显示在屏幕固定位置，方便截图确认样式。</summary>
+    public void ShowTrayMenuPreview()
+    {
+        ShowTrayMenu(new Point(600, 300));
+    }
+
+    /// <summary>
+    /// 整体重启：收起托盘图标、关闭窗口、停掉后端，然后以相同参数启动新进程。
+    /// 用户看到的效果就是“图标和窗口都消失，随后自动重新出现”。
+    /// </summary>
+    private void RestartApplication()
+    {
+        if (_exiting) return;
+        _exiting = true;
+
+        try
+        {
+            AppLog.Write("restart app: 关闭当前实例并拉起新进程");
+
+            // 先让图标和窗口消失
+            _tray.Visible = false;
+            _tray.Dispose();
+            _form.Hide();
+
+            // 停掉自己拉起的后端，等端口释放，避免新实例立刻启动时端口冲突
+            _server.StopAndWait();
+
+            var exe = Environment.ProcessPath ?? Application.ExecutablePath;
+            var psi = new ProcessStartInfo
+            {
+                FileName = exe,
+                Arguments = _launchArgs,
+                UseShellExecute = false,
+                WorkingDirectory = AppContext.BaseDirectory
+            };
+            Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("restart app FAILED: " + ex.Message);
+            MessageBox.Show("重启失败：" + ex.Message, "班级积分管理系统",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _form.Close();
+            ExitThread();
+            Application.Exit();
+        }
+    }
+
+    private static string Quote(string arg) =>
+        arg.Contains(' ') ? $"\"{arg}\"" : arg;
+
+    private void ShowMainWindow()
+    {
+        if (!_form.Visible) _form.Show();
+        if (_form.WindowState == FormWindowState.Minimized) _form.WindowState = FormWindowState.Normal;
+        _form.Activate();
+        _form.BringToFront();
+    }
+
+    private void OnFormClosing(object? sender, FormClosingEventArgs e)
+    {
+        // 点窗口上的 × 只是收进托盘，真正退出走托盘菜单
+        if (_exiting) return;
+        e.Cancel = true;
+        _form.Hide();
+    }
+
+    private void ExitApplication()
+    {
+        if (_exiting) return;
+        _exiting = true;
+
+        _tray.Visible = false;
+        _tray.Dispose();
+        _server.Stop();
+        _form.Close();
+        ExitThread();
+    }
+
+}
+
+/// <summary>内嵌 Python 后端的生命周期管理。</summary>
+internal sealed class BackendServer
+{
+    private const int PreferredPort = 3445;
+
+    private readonly string _root;
+    private Process? _process;
+    private bool _reused;
+
+    public BackendServer(string root) => _root = root;
+
+    public string Url => $"http://127.0.0.1:{Port}";
+
+    public int Port { get; private set; }
+
+    public string Start() => StartCore(allowReuse: true);
+
+    /// <summary>重启后端：停掉当前进程，等端口释放后重新拉起。</summary>
+    public string Restart()
+    {
+        var port = Port;
+        if (_reused)
+        {
+            // 复用的是别的实例留下的后端，我们停不掉它，只能另起一个
+            _reused = false;
+            AppLog.Write("restart: 跳过复用实例，重新拉起自己的后端");
+        }
+        else
+        {
+            Stop();
+            WaitPortFree(port, TimeSpan.FromSeconds(6));
+        }
+        return StartCore(allowReuse: false);
+    }
+
+    private string StartCore(bool allowReuse)
+    {
+        // 3445 上已经是本应用（比如上次没退干净）就直接复用，不再起第二个后端
+        if (allowReuse && LooksLikeOurApp(PreferredPort))
+        {
+            Port = PreferredPort;
+            _reused = true;
+            AppLog.Write($"backend reuse: 已有实例在 {PreferredPort}");
+            return Url;
+        }
+
+        var appDir = Path.Combine(_root, "class-score-system");
+        var python = Path.Combine(appDir, "python", "python.exe");
+
+        if (!File.Exists(python))
+            throw new FileNotFoundException(
+                "未找到内嵌 Python 运行时：" + python +
+                "\n请确认 class-score-system\\python 目录完整（该目录不入库，需单独放置）。");
+
+        Port = FindFreePort(PreferredPort);
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = python,
+            Arguments = $"-m uvicorn main:app --host 127.0.0.1 --port {Port}",
+            WorkingDirectory = appDir,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+
+        _process = Process.Start(psi)
+                   ?? throw new InvalidOperationException("无法启动后端服务");
+
+        // 保留最近几行输出，启动失败时能看到真实原因
+        var stderrTail = new List<string>();
+
+        // 不读就会塞满管道
+        _process.OutputDataReceived += (_, _) => { };
+        _process.ErrorDataReceived += (_, e) =>
+        {
+            if (string.IsNullOrWhiteSpace(e.Data)) return;
+            lock (stderrTail)
+            {
+                stderrTail.Add(e.Data);
+                if (stderrTail.Count > 20) stderrTail.RemoveAt(0);
+            }
+        };
+        _process.BeginOutputReadLine();
+        _process.BeginErrorReadLine();
+
+        AppLog.Write($"backend start: {python} {psi.Arguments} (cwd={appDir})");
+
+        if (!WaitForPort(TimeSpan.FromSeconds(25)))
+        {
+            string detail;
+            lock (stderrTail) detail = string.Join("\n", stderrTail);
+            Stop();
+            AppLog.Write("backend start FAILED: " + detail);
+            throw new Exception(
+                $"后端服务未能启动（端口 {Port}）。\n\n" +
+                (string.IsNullOrWhiteSpace(detail) ? "进程无输出，可能 python 运行时不完整。" : detail));
+        }
+
+        AppLog.Write($"backend ready on {Url}");
+
+        return Url;
+    }
+
+    /// <summary>停掉后端并等待端口释放，供整体重启时使用。</summary>
+    public void StopAndWait()
+    {
+        var port = Port;
+        Stop();
+        if (port > 0) WaitPortFree(port, TimeSpan.FromSeconds(6));
+    }
+
+    public void Stop()
+    {
+        if (_reused) return;   // 复用已有实例时不动它
+
+        try
+        {
+            if (_process is { HasExited: false })
+            {
+                _process.Kill(entireProcessTree: true);
+                _process.WaitForExit(3000);
+            }
+        }
+        catch
+        {
+            // 退出阶段忽略
+        }
+        finally
+        {
+            _process?.Dispose();
+            _process = null;
+        }
+    }
+
+    /// <summary>端口上跑的是不是本应用（看登录页是否含我们的样式类）。</summary>
+    private static bool LooksLikeOurApp(int port)
+    {
+        try
+        {
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMilliseconds(900) };
+            var html = http.GetStringAsync($"http://127.0.0.1:{port}/login").GetAwaiter().GetResult();
+            return html.Contains("auth-card", StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void WaitPortFree(int port, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                var probe = new TcpListener(IPAddress.Loopback, port);
+                probe.Start();
+                probe.Stop();
+                return;
+            }
+            catch (SocketException)
+            {
+                Thread.Sleep(150);
+            }
+        }
+    }
+
+    private bool WaitForPort(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (_process is { HasExited: true }) return false;
+            try
+            {
+                using var client = new TcpClient();
+                var task = client.ConnectAsync(IPAddress.Loopback, Port);
+                if (task.Wait(400) && client.Connected) return true;
+            }
+            catch
+            {
+                // 还没起来，继续等
+            }
+            Thread.Sleep(200);
+        }
+        return false;
+    }
+
+    private static int FindFreePort(int start)
+    {
+        for (var port = start; port < start + 30; port++)
+        {
+            try
+            {
+                var listener = new TcpListener(IPAddress.Loopback, port);
+                listener.Start();
+                listener.Stop();
+                return port;
+            }
+            catch (SocketException)
+            {
+                // 被占用，试下一个
+            }
+        }
+        throw new InvalidOperationException($"找不到可用端口（{PreferredPort}-{PreferredPort + 29}）");
+    }
+}
+
+/// <summary>WebView2 主窗口。</summary>
+internal sealed class MainForm : Form
+{
+    private readonly WebView2 _web;
+    private string _url;
+
+    public MainForm(string url, Icon? icon)
+    {
+        _url = url;
+
+        Text = "班级积分管理系统";
+        StartPosition = FormStartPosition.CenterScreen;
+        MinimumSize = new Size(880, 600);
+        BackColor = Color.White;
+        if (icon is not null) Icon = icon;
+
+        _web = new WebView2 { Dock = DockStyle.Fill };
+        Controls.Add(_web);
+
+        Load += async (_, _) =>
+        {
+            await InitializeWebViewAsync();
+        };
+    }
+
+    /// <summary>弹出“另存为”，让用户决定导出文件保存到哪里。</summary>
+    private void ShowSaveDialog(CoreWebView2DownloadStartingEventArgs e)
+    {
+        try
+        {
+            var suggested = Path.GetFileName(e.ResultFilePath);
+            if (string.IsNullOrWhiteSpace(suggested)) suggested = "积分卡.docx";
+
+            var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            using var dialog = new SaveFileDialog
+            {
+                Title = "保存导出的文件",
+                FileName = suggested,
+                InitialDirectory = Directory.Exists(docs) ? docs : null,
+                Filter = "Word 文档 (*.docx)|*.docx|所有文件 (*.*)|*.*",
+                OverwritePrompt = true,
+                AddExtension = true
+            };
+
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                e.ResultFilePath = dialog.FileName;
+                e.Handled = true;      // 使用我们指定的路径，不再弹 Edge 自己的下载提示
+            }
+            else
+            {
+                e.Cancel = true;       // 用户取消，直接中止下载
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("download dialog failed: " + ex.Message);
+        }
+    }
+
+    /// <summary>按屏幕工作区收缩并居中（全部用像素计算，避开 DIP 换算）。</summary>
+    private void ApplyWindowSize()
+    {
+        var area = Screen.FromControl(this).WorkingArea;
+
+        var width = Math.Max(900, (int)(area.Width * 0.86));
+        var height = Math.Max(620, (int)(area.Height * 0.86));
+
+        MinimumSize = new Size(880, 600);
+        StartPosition = FormStartPosition.Manual;
+        SetBounds(
+            area.X + (area.Width - width) / 2,
+            area.Y + (area.Height - height) / 2,
+            width,
+            height);
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        ApplyWindowSize();   // 布局完成后再定位，CenterToScreen 才不会用旧尺寸
+    }
+
+    /// <summary>重启后导航到（可能是新的）地址；地址没变就刷新。</summary>
+    public void NavigateTo(string url)
+    {
+        if (string.Equals(_url, url, StringComparison.OrdinalIgnoreCase))
+        {
+            _web.CoreWebView2?.Reload();
+            return;
+        }
+        _url = url;
+        if (_web.CoreWebView2 is not null) _web.Source = new Uri(url);
+    }
+
+    private async Task InitializeWebViewAsync()
+    {
+        try
+        {
+            await _web.EnsureCoreWebView2Async(null);
+
+            var settings = _web.CoreWebView2.Settings;
+            settings.AreDevToolsEnabled = false;
+            settings.IsStatusBarEnabled = false;
+            settings.AreDefaultContextMenusEnabled = false;
+            settings.IsZoomControlEnabled = false;
+
+            // 页面里的外链走系统浏览器，不在应用内开新窗口
+            _web.CoreWebView2.NewWindowRequested += (_, e) =>
+            {
+                e.Handled = true;
+                try { Process.Start(new ProcessStartInfo(e.Uri) { UseShellExecute = true }); } catch { }
+            };
+
+            // 下载（导出 Word）走系统“另存为”，由用户选位置，避免默认目录不可写时报错
+            _web.CoreWebView2.DownloadStarting += (_, e) => ShowSaveDialog(e);
+
+            _web.Source = new Uri(_url);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "WebView2 初始化失败：" + ex.Message +
+                "\n\n请确认已安装 Microsoft Edge WebView2 运行时。",
+                "班级积分管理系统", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    public void Reload() => _web.CoreWebView2?.Reload();
+}
+
+/// <summary>极简文件日志：%LOCALAPPDATA%\ClassScore-Desktop\desktop.log</summary>
+internal static class AppLog
+{
+    private static readonly object Gate = new();
+
+    public static string FilePath { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ClassScore-Desktop", "desktop.log");
+
+    public static void Write(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            lock (Gate)
+            {
+                File.AppendAllText(FilePath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {message}{Environment.NewLine}");
+            }
+        }
+        catch
+        {
+            // 日志失败不影响主流程
+        }
+    }
+}
+
+/// <summary>路径与图标解析。</summary>
+internal static class AppPaths
+{
+    public static string? FindProjectRoot()
+    {
+        // 1) 命令行 --root
+        var overridden = Program.RootOverride;
+        if (!string.IsNullOrWhiteSpace(overridden) && HasRuntime(overridden)) return overridden;
+
+        // 2) 环境变量 CLASS_SCORE_ROOT
+        var fromEnv = Environment.GetEnvironmentVariable("CLASS_SCORE_ROOT");
+        if (!string.IsNullOrWhiteSpace(fromEnv) && HasRuntime(fromEnv)) return fromEnv;
+
+        // 3) 从 exe 所在目录向上找
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+
+        for (var i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "class-score-system", "python", "python.exe");
+            if (File.Exists(candidate)) return dir.FullName;
+        }
+
+        // 兼容把 exe 直接放在 class-score-system 同级的情况
+        var fallback = Path.Combine(AppContext.BaseDirectory, "class-score-system", "python", "python.exe");
+        return File.Exists(fallback) ? AppContext.BaseDirectory : null;
+    }
+
+    private static bool HasRuntime(string root) =>
+        File.Exists(Path.Combine(root, "class-score-system", "python", "python.exe"));
+
+    public static Icon? LoadIcon(string root)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(root, "logo.ico"),
+            Path.Combine(root, "class-score-system", "logo.ico")
+        };
+
+        foreach (var path in candidates)
+        {
+            if (!File.Exists(path)) continue;
+            try { return new Icon(path); } catch { }
+        }
+
+        return SystemIcons.Application;
+    }
+}
