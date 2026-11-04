@@ -13,6 +13,10 @@ internal static class Program
     /// <summary>命令行传入的项目根目录（可选）：--root "D:\class-score"</summary>
     public static string? RootOverride { get; private set; }
 
+    /// <summary>单实例互斥体；整体重启时会先释放，交给新进程。</summary>
+    internal static Mutex? InstanceMutex;
+    internal static EventWaitHandle? ShowWindowEvent;
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -26,9 +30,22 @@ internal static class Program
             if (args[i] is "--root" or "-r") RootOverride = args[i + 1];
         }
 
+        // 单实例：已经有实例在跑，就把它叫到前台，本进程直接退出
+        InstanceMutex = new Mutex(initiallyOwned: true, @"Local\ClassScore.Desktop.SingleInstance", out var isFirstInstance);
+        ShowWindowEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ClassScore.Desktop.ShowWindow");
+
+        if (!isFirstInstance)
+        {
+            try { ShowWindowEvent.Set(); } catch { }
+            return;
+        }
+
+        // --tray：开机自启时只驻留托盘，不自动弹主窗口
+        var startInTray = args.Contains("--tray");
+
         try
         {
-            using var context = new TrayApplicationContext();
+            using var context = new TrayApplicationContext(startInTray);
 
             if (args.Contains("--preview-menu"))
             {
@@ -41,6 +58,18 @@ internal static class Program
                 };
                 timer.Start();
             }
+
+            // 另一个实例启动时会 Set 这个事件，这里把主窗口叫到前台
+            var listener = new Thread(() =>
+            {
+                while (true)
+                {
+                    ShowWindowEvent.WaitOne();
+                    context.PostShowMainWindow();
+                }
+            })
+            { IsBackground = true, Name = "show-window-listener" };
+            listener.Start();
 
             Application.Run(context);
         }
@@ -58,9 +87,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly MainForm _form;
     private readonly NotifyIcon _tray;
     private readonly string _launchArgs;
+    private readonly SynchronizationContext _uiContext;
     private bool _exiting;
 
-    public TrayApplicationContext()
+    public TrayApplicationContext(bool startInTray)
     {
         var root = AppPaths.FindProjectRoot()
                    ?? throw new InvalidOperationException(
@@ -68,11 +98,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         // 只保留 --root 之后的参数，重启时原样传给新进程
         var all = Environment.GetCommandLineArgs().Skip(1)
-            .Where(a => a is not "--preview-menu" and not "--test-restart")
+            .Where(a => a is not "--preview-menu" and not "--test-restart" and not "--tray")
             .ToArray();
         _launchArgs = string.Join(" ", all.Select(Quote));
 
         ApplyAutostart(root);
+
+        // 记录 UI 线程上下文：托盘线程/监听线程靠它切回主线程
+        _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
         _server = new BackendServer(root);
         var url = _server.Start();
@@ -92,7 +125,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             if (e.Button == MouseButtons.Right) ShowTrayMenu(Cursor.Position);
         };
 
-        ShowMainWindow();
+        // 开机自启（--tray）时只驻留托盘，其余情况正常开窗
+        if (!startInTray) ShowMainWindow();
     }
 
     /// <summary>按 data/config.json 里的 desktop.autostart 增删开机启动项（当前用户 Run 键）。</summary>
@@ -122,7 +156,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             if (enabled)
             {
                 var exe = Environment.ProcessPath ?? Application.ExecutablePath;
-                key.SetValue(valueName, $"\"{exe}\" --root \"{root}\"");
+                key.SetValue(valueName, $"\"{exe}\" --root \"{root}\" --tray");
                 AppLog.Write("autostart: 已登记开机启动");
             }
             else if (key.GetValue(valueName) is not null)
@@ -182,6 +216,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
             // 停掉自己拉起的后端，等端口释放，避免新实例立刻启动时端口冲突
             _server.StopAndWait();
 
+            // 先释放单实例互斥体，否则新进程会被判定为“已有实例”而直接退出
+            try { Program.InstanceMutex?.ReleaseMutex(); } catch { }
+            Program.InstanceMutex?.Dispose();
+            Program.InstanceMutex = null;
+
             var exe = Environment.ProcessPath ?? Application.ExecutablePath;
             var psi = new ProcessStartInfo
             {
@@ -208,6 +247,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private static string Quote(string arg) =>
         arg.Contains(' ') ? $"\"{arg}\"" : arg;
+
+    /// <summary>供后台线程调用：切回 UI 线程显示主窗口（窗口句柄可能还没创建，必须走上下文投递）。</summary>
+    public void PostShowMainWindow()
+    {
+        try
+        {
+            _uiContext.Post(_ => ShowMainWindow(), null);
+        }
+        catch
+        {
+            // 退出阶段忽略
+        }
+    }
 
     private void ShowMainWindow()
     {

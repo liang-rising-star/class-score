@@ -491,6 +491,30 @@ textarea { min-height: 180px; resize: vertical; font-size: 15px; line-height: 1.
     text-align: center;
 }
 
+/* 初始化页：旧库导入区 */
+.import-block {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px dashed var(--border);
+}
+
+.import-title {
+    font-size: 13.5px;
+    font-weight: 650;
+    color: var(--text-strong);
+    margin-bottom: 4px;
+}
+
+.import-hint {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin-bottom: 12px;
+}
+
+.btn-block + .btn-block,
+.import-block .btn-block { margin-top: 0; }
+
 /* ------------------------------ 首页功能入口 ------------------------------ */
 
 .tile-grid {
@@ -826,26 +850,71 @@ textarea { min-height: 180px; resize: vertical; font-size: 15px; line-height: 1.
 
 .form-actions form { display: inline; }
 
-.switch-row {
+/* 开关滑块 */
+.switch {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 16px;
     margin-bottom: 18px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface-soft);
-    font-size: 13.5px;
-    color: var(--text);
     cursor: pointer;
     user-select: none;
+    transition: border-color .18s, background .18s;
 }
 
-.switch-row input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-    accent-color: var(--primary);
-    cursor: pointer;
+.switch:hover { border-color: var(--border-strong); }
+
+.switch__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 14px;
+    color: var(--text);
+}
+
+.switch__hint { font-size: 12px; color: var(--text-faint); }
+
+.switch input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.switch__track {
+    position: relative;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 26px;
+    border-radius: 999px;
+    background: #cbd5e1;
+    transition: background .2s ease;
+}
+
+.switch__track::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .3);
+    transition: transform .2s ease;
+}
+
+.switch input:checked + .switch__track { background: var(--primary); }
+
+.switch input:checked + .switch__track::after { transform: translateX(18px); }
+
+.switch input:focus-visible + .switch__track {
+    outline: 3px solid var(--primary-ring);
+    outline-offset: 2px;
 }
 
 .cleanup-row {

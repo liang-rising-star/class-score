@@ -142,9 +142,13 @@
 
             <form action="/desktop/autostart" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <label class="switch-row">
+                <label class="switch">
+                    <span class="switch__text">
+                        开机自动启动桌面版
+                        <span class="switch__hint">开机后仅在托盘运行，双击图标再打开主界面</span>
+                    </span>
                     <input type="checkbox" name="autostart" {% if autostart %}checked{% endif %}>
-                    <span>开机自动启动桌面版</span>
+                    <span class="switch__track" aria-hidden="true"></span>
                 </label>
                 <div class="form-actions">
                     <button type="submit" class="btn">保存设置</button>

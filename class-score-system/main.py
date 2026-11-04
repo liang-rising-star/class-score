@@ -404,6 +404,87 @@ def clean_junk():
     return removed, freed
 
 
+def pick_folder(title="选择文件夹"):
+    """在服务器本机弹出系统文件夹选择框（本机部署时即用户自己的桌面）。"""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        path = filedialog.askdirectory(title=title, mustexist=True)
+        root.destroy()
+        return path or None
+    except Exception:
+        return None
+
+
+def find_legacy_databases(folder, max_depth=4):
+    """在旧版安装目录里递归找 scores.db，返回 [(path, rows, mtime)]，按记录数降序。"""
+    results = []
+    base = os.path.abspath(folder).rstrip(os.sep)
+    for root, dirs, files in os.walk(base):
+        depth = root[len(base):].count(os.sep)
+        if depth > max_depth:
+            dirs[:] = []
+            continue
+        dirs[:] = [d for d in dirs if d not in {"__pycache__", ".git", "node_modules"}]
+        for name in files:
+            if name.lower() != "scores.db":
+                continue
+            path = os.path.join(root, name)
+            rows = 0
+            try:
+                probe = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+                rows = probe.execute("SELECT COUNT(*) FROM scores").fetchone()[0]
+                probe.close()
+            except Exception:
+                continue
+            results.append((path, rows, os.path.getmtime(path)))
+    results.sort(key=lambda item: (item[1], item[2]), reverse=True)
+    return results
+
+
+def import_legacy_database(src_path):
+    """把旧库的积分记录合并进当前库，返回 (总数, 实际导入数)。"""
+    src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
+    src.row_factory = sqlite3.Row
+    try:
+        columns = {row["name"] for row in src.execute("PRAGMA table_info(scores)")}
+        required = {"class_name", "title", "amount", "code", "hash", "issue_date"}
+        if not required.issubset(columns):
+            raise ValueError("该数据库不是本系统的数据表（缺少必要字段）")
+
+        has_status = "status" in columns
+        has_time = "verified_at" in columns
+        rows = src.execute("SELECT * FROM scores").fetchall()
+    finally:
+        src.close()
+
+    init_db()
+    db = connect_db()
+    try:
+        with db:
+            before = db.total_changes
+            for row in rows:
+                db.execute(
+                    "INSERT OR IGNORE INTO scores"
+                    " (class_name, title, amount, code, hash, issue_date, status, verified_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        row["class_name"], row["title"], row["amount"], row["code"], row["hash"],
+                        row["issue_date"],
+                        row["status"] if has_status else "未使用",
+                        row["verified_at"] if has_time else None,
+                    ),
+                )
+            inserted = db.total_changes - before
+    finally:
+        db.close()
+    return len(rows), inserted
+
+
 def human_size(size):
     size = float(size)
     for unit in ("B", "KB", "MB", "GB"):
@@ -779,13 +860,62 @@ async def security_middleware(request: Request, call_next):
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     return response
 
+# 初始化页的一次性提示（导入旧库结果等）
+_init_notice = None
+
+
 # 初始化管理员页面
 @app.get("/", response_class=HTMLResponse)
 async def init_admin(request: Request):
+    global _init_notice
     config = read_config()
     if config["system"]["init_required"]:
-        return render(request, "init_admin.html", {"system_name": config["system"]["name"]})
+        notice = _init_notice
+        _init_notice = None
+        return render(request, "init_admin.html", {
+            "system_name": config["system"]["name"],
+            "notice": notice,
+        })
     return RedirectResponse(url="/login")
+
+# 从 2.x 旧版本导入数据库（仅首次初始化时可用）
+@app.post("/import_legacy")
+def import_legacy(request: Request, legacy_path: str = Form(None),
+                  csrf_token: str = Form(None)):
+    global _init_notice
+    check_csrf(request, csrf_token)
+
+    config = read_config()
+    if not config["system"].get("init_required"):
+        raise HTTPException(status_code=403, detail="系统已初始化，不能再导入旧数据")
+
+    folder = (legacy_path or "").strip().strip('"')
+    if not folder:
+        folder = pick_folder("选择旧版程序安装目录") or ""
+    if not folder or not os.path.isdir(folder):
+        _init_notice = {"kind": "error", "text": "未选择有效的文件夹"}
+        return RedirectResponse(url="/", status_code=303)
+
+    candidates = find_legacy_databases(folder)
+    if not candidates:
+        _init_notice = {"kind": "error",
+                        "text": f"没有在该目录下找到 scores.db：{folder}"}
+        return RedirectResponse(url="/", status_code=303)
+
+    src_path, known_rows, _ = candidates[0]
+    try:
+        total, inserted = import_legacy_database(src_path)
+    except Exception as exc:
+        _init_notice = {"kind": "error", "text": f"导入失败：{exc}"}
+        return RedirectResponse(url="/", status_code=303)
+
+    skipped = total - inserted
+    text = f"已从 {src_path} 导入 {inserted} 条记录"
+    if skipped > 0:
+        text += f"（跳过重复 {skipped} 条）"
+    _init_notice = {"kind": "success", "text": text}
+    return RedirectResponse(url="/", status_code=303)
+
 
 # 提交管理员初始化
 @app.post("/init_admin")

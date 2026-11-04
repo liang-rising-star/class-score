@@ -20,6 +20,10 @@
             <div class="alert alert-error">{{ error }}</div>
             {% endif %}
 
+            {% if notice %}
+            <div class="alert alert-{{ 'success' if notice.kind == 'success' else 'error' }}">{{ notice.text }}</div>
+            {% endif %}
+
             <form action="/init_admin" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="field">
@@ -35,6 +39,15 @@
                 </div>
                 <button type="submit" class="btn btn-block">创建管理员</button>
             </form>
+
+            <div class="import-block">
+                <div class="import-title">已有旧版本数据？</div>
+                <p class="import-hint">从 2.x 版本导入积分记录（含已核销状态），导入后再创建管理员</p>
+                <form action="/import_legacy" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-ghost btn-block">选择旧版安装目录并导入</button>
+                </form>
+            </div>
 
             <div class="auth-foot">{{ system_name }} · 仅首次启动需要设置</div>
         </div>
