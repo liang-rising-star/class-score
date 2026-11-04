@@ -67,7 +67,7 @@
                 </svg>
                 数据备份
             </div>
-            <p class="card-sub">把配置和积分数据库打包成 zip，保存在 data/backups 目录</p>
+            <p class="card-sub">把配置和积分数据库打包成 zip，保存在 data/backups 目录；也可以从 2.x 旧版本导入积分记录</p>
 
             {% if notice %}
             <div class="alert alert-{{ 'success' if notice.kind == 'success' else ('error' if notice.kind == 'error' else 'info') }}">{{ notice.text }}</div>
@@ -92,6 +92,10 @@
                 <form action="/backup/open" method="post">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <button type="submit" class="btn btn-ghost">打开备份文件夹</button>
+                </form>
+                <form action="/import_legacy" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-ghost">导入 2.x 旧库</button>
                 </form>
             </div>
         </div>

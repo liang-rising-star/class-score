@@ -886,34 +886,47 @@ def import_legacy(request: Request, legacy_path: str = Form(None),
     check_csrf(request, csrf_token)
 
     config = read_config()
-    if not config["system"].get("init_required"):
-        raise HTTPException(status_code=403, detail="系统已初始化，不能再导入旧数据")
+    init_mode = bool(config["system"].get("init_required"))
+    sid, sess = get_session(request)
+
+    # 初始化阶段无需登录；已初始化的系统必须登录后才能导入
+    if not init_mode and not sess:
+        raise HTTPException(status_code=403, detail="请先登录再导入旧数据")
+
+    target = "/" if init_mode else "/setting"
+
+    def finish(kind, text):
+        if init_mode:
+            return _finish_init_notice(kind, text)
+        sess["notice"] = {"kind": kind, "text": text}
+        return RedirectResponse(url=target, status_code=303)
 
     folder = (legacy_path or "").strip().strip('"')
     if not folder:
         folder = pick_folder("选择旧版程序安装目录") or ""
     if not folder or not os.path.isdir(folder):
-        _init_notice = {"kind": "error", "text": "未选择有效的文件夹"}
-        return RedirectResponse(url="/", status_code=303)
+        return finish("error", "未选择有效的文件夹")
 
     candidates = find_legacy_databases(folder)
     if not candidates:
-        _init_notice = {"kind": "error",
-                        "text": f"没有在该目录下找到 scores.db：{folder}"}
-        return RedirectResponse(url="/", status_code=303)
+        return finish("error", f"没有在该目录下找到 scores.db：{folder}")
 
-    src_path, known_rows, _ = candidates[0]
+    src_path, _, _ = candidates[0]
     try:
         total, inserted = import_legacy_database(src_path)
     except Exception as exc:
-        _init_notice = {"kind": "error", "text": f"导入失败：{exc}"}
-        return RedirectResponse(url="/", status_code=303)
+        return finish("error", f"导入失败：{exc}")
 
     skipped = total - inserted
     text = f"已从 {src_path} 导入 {inserted} 条记录"
     if skipped > 0:
         text += f"（跳过重复 {skipped} 条）"
-    _init_notice = {"kind": "success", "text": text}
+    return finish("success", text)
+
+
+def _finish_init_notice(kind, text):
+    global _init_notice
+    _init_notice = {"kind": kind, "text": text}
     return RedirectResponse(url="/", status_code=303)
 
 
