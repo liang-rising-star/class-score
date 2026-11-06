@@ -15,6 +15,9 @@ internal static class Program
     public static string? RootOverride { get; private set; }
 
     /// <summary>单实例互斥体；整体重启时会先释放，交给新进程。</summary>
+    /// <summary>主窗口的 WebView2 环境，隐藏打印窗体复用它（共享 cookie 与浏览器进程）。</summary>
+    internal static CoreWebView2Environment? BrowserEnvironment;
+
     internal static Mutex? InstanceMutex;
     internal static EventWaitHandle? ShowWindowEvent;
 
@@ -623,6 +626,7 @@ internal sealed class MainForm : Form
             // 页面里的“选择旧版安装目录”调用原生对话框（DPI 正常、带本程序图标）
             try
             {
+                Program.BrowserEnvironment = _web.CoreWebView2.Environment;
                 _web.CoreWebView2.AddHostObjectToScript("desktopBridge", new DesktopBridge(this));
                 AppLog.Write("host bridge registered");
             }
@@ -653,6 +657,87 @@ public class DesktopBridge
     private readonly Form _owner;
 
     public DesktopBridge(Form owner) => _owner = owner;
+
+    /// <summary>用隐藏的 WebView2 加载打印页并静默打印（不启动 WPS/Word）。</summary>
+    public string PrintUrl(string url, string printerName)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return "failed: empty url";
+
+        try
+        {
+            _owner.BeginInvoke(new Action(() => { _ = PrintHiddenAsync(url, printerName); }));
+            return "queued";
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("PrintUrl failed: " + ex.Message);
+            return "failed: " + ex.Message;
+        }
+    }
+
+    private async Task PrintHiddenAsync(string url, string printerName)
+    {
+        Form? host = null;
+        WebView2? view = null;
+        try
+        {
+            var environment = Program.BrowserEnvironment;
+            if (environment is null)
+            {
+                AppLog.Write("print: 浏览器环境未就绪");
+                return;
+            }
+
+            host = new Form
+            {
+                ShowInTaskbar = false,
+                StartPosition = FormStartPosition.Manual,
+                Location = new Point(-32000, -32000),
+                Size = new Size(1123, 1587),
+                FormBorderStyle = FormBorderStyle.None,
+                ShowIcon = false
+            };
+            view = new WebView2 { Dock = DockStyle.Fill };
+            host.Controls.Add(view);
+            host.Show();
+
+            await view.EnsureCoreWebView2Async(environment);
+
+            var loaded = new TaskCompletionSource<bool>();
+            view.CoreWebView2.NavigationCompleted += (_, e) => loaded.TrySetResult(e.IsSuccess);
+            view.CoreWebView2.Navigate(url);
+
+            if (!await loaded.Task)
+            {
+                AppLog.Write("print: 打印页加载失败");
+                return;
+            }
+
+            // 等条码图片与字体渲染完
+            await Task.Delay(900);
+
+            var settings = view.CoreWebView2.Environment.CreatePrintSettings();
+            settings.ShouldPrintBackgrounds = true;
+            settings.ShouldPrintHeaderAndFooter = false;
+            settings.MarginTop = 0;
+            settings.MarginBottom = 0;
+            settings.MarginLeft = 0;
+            settings.MarginRight = 0;
+            if (!string.IsNullOrWhiteSpace(printerName)) settings.PrinterName = printerName;
+
+            var result = await view.CoreWebView2.PrintAsync(settings);
+            AppLog.Write($"print: {result} -> {(string.IsNullOrWhiteSpace(printerName) ? "系统默认打印机" : printerName)}");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("print: 失败 " + ex.Message);
+        }
+        finally
+        {
+            try { view?.Dispose(); } catch { }
+            try { host?.Close(); host?.Dispose(); } catch { }
+        }
+    }
 
     /// <summary>弹出系统文件夹选择框；返回选中路径，取消返回空串。</summary>
     public string PickFolder(string title)

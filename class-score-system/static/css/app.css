@@ -525,6 +525,9 @@ select option { padding: 10px 12px; font-size: 15px; color: var(--text); backgro
     text-align: center;
 }
 
+/* 隐藏的属性优先级：保证 hidden 生效 */
+[hidden] { display: none !important; }
+
 /* 初始化页：旧库导入区 */
 .import-block {
     margin-top: 24px;

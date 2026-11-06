@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form, HTTPException
+from fastapi import FastAPI, Request, Form, HTTPException, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
@@ -1221,6 +1221,11 @@ async def submit_generate(request: Request, class_name: str = Form(...), title: 
         "filepath": filepath,
         "filename": os.path.basename(filepath),
         "quantity": quantity,
+        "class_name": class_name,
+        "title": title,
+        "amount": amount,
+        "issue_date": issue_date,
+        "codes": codes,
     }
     return RedirectResponse(url="/generate_result", status_code=303)
 
@@ -1241,6 +1246,7 @@ async def generate_result(request: Request):
         "filename": result["filename"],
         "quantity": result["quantity"],
         "notice": notice,
+        "printer_value": (read_config().get("print", {}) or {}).get("printer", "") or "",
     })
 
 # 核销页面
@@ -1589,6 +1595,48 @@ async def reset_system(request: Request, reset_password: str = Form(...), csrf_t
         return RedirectResponse(url="/setting", status_code=303)
     do_reset()
     return RedirectResponse(url="/", status_code=303)
+
+
+# 打印页：把卡片渲染成 A4 网格，由桌面版静默打印（不经过 WPS/Word）
+@app.get("/print-sheet", response_class=HTMLResponse)
+async def print_sheet(request: Request):
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login")
+
+    result = sess.get("gen")
+    if not result or not result.get("codes"):
+        return RedirectResponse(url="/generate")
+
+    codes = result["codes"]
+    per_page = CARD_ROWS_PER_PAGE * CARD_COLUMNS_PER_PAGE
+    pages = [codes[i:i + per_page] for i in range(0, len(codes), per_page)]
+
+    return render(request, "print_sheet.html", {
+        "system_name": result["system_name"],
+        "class_name": result["class_name"],
+        "title": result["title"],
+        "amount": result["amount"],
+        "issue_date": result["issue_date"],
+        "pages": pages,
+        "column_width_cm": CARD_COLUMN_WIDTH_CM,
+        "row_height_cm": round(int(CARD_ROW_HEIGHT_TWIP) / 567.0, 3),
+    })
+
+
+# 条码图片：按编号即时生成 PNG，供打印页引用
+@app.get("/barcode/{code}.png")
+async def barcode_png(request: Request, code: str):
+    sid, sess = get_session(request)
+    if not sess:
+        raise HTTPException(status_code=403, detail="请先登录")
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{4,64}", code or ""):
+        raise HTTPException(status_code=400, detail="编号格式不正确")
+
+    buf = generate_barcode_image(code)
+    return Response(content=buf.getvalue(), media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=3600"})
 
 
 # 直接调用系统打印（默认打印机），交给关联程序（Word / WPS）处理

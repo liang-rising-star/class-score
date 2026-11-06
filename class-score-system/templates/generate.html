@@ -65,6 +65,7 @@
 
             {% if success %}
             <div class="success-panel">
+                <div id="printFlash" class="alert alert-success" hidden></div>
                 {% if notice %}
                 <div class="alert alert-{{ 'success' if notice.kind == 'success' else 'error' }}">{{ notice.text }}</div>
                 {% endif %}
@@ -77,10 +78,11 @@
                 </h3>
                 <p>已生成 {{ quantity }} 张积分卡并导出 Word 文档</p>
                 <div class="form-actions">
-                    <form action="/print" method="post">
+                    <form action="/print" method="post" id="printForm">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <input type="hidden" name="filename" value="{{ filename }}">
-                        <button type="submit" class="btn">直接打印</button>
+                        <button type="button" id="printBtn" class="btn"
+                                data-printer="{{ printer_value }}">直接打印</button>
                     </form>
                     <a href="/download/{{ filename }}" class="btn btn-ghost">保存 Word 文档</a>
                     <span class="file-chip">{{ filename }}</span>
@@ -91,5 +93,41 @@
     </main>
 
     </div>
+
+<script>
+// 桌面版：把打印页交给程序静默打印（不经过 WPS/Word）；网页版回退到服务端打印
+(function() {
+    var btn = document.getElementById('printBtn');
+    var form = document.getElementById('printForm');
+    if (!btn || !form) return;
+
+    function bridge() {
+        return (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects)
+            ? window.chrome.webview.hostObjects.desktopBridge : null;
+    }
+
+    function flash(text, isError) {
+        var box = document.getElementById('printFlash');
+        if (!box) return;
+        box.textContent = text;
+        box.className = 'alert alert-' + (isError ? 'error' : 'success');
+    }
+
+    btn.addEventListener('click', function() {
+        var b = bridge();
+        if (!b) { form.submit(); return; }          // 网页版：走系统打印
+
+        btn.disabled = true;
+        var url = location.origin + '/print-sheet';
+        b.PrintUrl(url, btn.dataset.printer || '').then(function(r) {
+            flash(r && r.indexOf('queued') === 0 ? '已发送到打印机' : ('打印失败：' + r), false);
+            setTimeout(function() { btn.disabled = false; }, 1200);
+        }).catch(function(err) {
+            flash('打印失败：' + err, true);
+            btn.disabled = false;
+        });
+    });
+})();
+</script>
 </body>
 </html>
