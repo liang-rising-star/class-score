@@ -67,7 +67,16 @@ PBKDF2_ROUNDS = 200_000
 CARD_COLUMNS_PER_PAGE = 3
 CARD_ROWS_PER_PAGE = 7
 CARD_COLUMN_WIDTH_CM = 6.0
-CARD_ROW_HEIGHT_TWIP = '2131'     # 约 3.76cm，exact 固定行高
+CARD_ROW_HEIGHT_TWIP = '2131'     # 约 3.76cm，exact 固定行高（备用）
+PAGE_HEIGHT_CM = 29.7
+PAGE_MARGIN_V_CM = 1.0            # 上下边距合计
+
+
+def card_row_height_twip():
+    """把手写卡行高设为「A4 可用高度 / 每页行数」，页面底部不再留大片空白。"""
+    # 预留 0.3cm，避免表格因边框/单元格间距多出一行而翻页
+    usable = PAGE_HEIGHT_CM - PAGE_MARGIN_V_CM - 0.9
+    return str(int(round(usable / CARD_ROWS_PER_PAGE * 567)))
 
 # 会话存储（简单内存存储，生产环境应使用Redis等）
 # sid -> {"user": str, "expires": float, "gen": dict, "verify": dict, "setting": str}
@@ -987,7 +996,7 @@ def export_to_word(class_name, title, amount, codes, issue_date):
     rows_per_page = CARD_ROWS_PER_PAGE
     columns = CARD_COLUMNS_PER_PAGE
     column_width = CARD_COLUMN_WIDTH_CM  # cm
-    row_height_twip = CARD_ROW_HEIGHT_TWIP  # ≈3.76cm，exact固定
+    row_height_twip = card_row_height_twip()  # A4 可用高度均分，整页填满
     items_per_page = rows_per_page * columns
     tab_right_pos = str(int(column_width * 567))
 
@@ -1937,7 +1946,7 @@ async def print_sheet(request: Request, id: str = None):
         "issue_date": result["issue_date"],
         "pages": pages,
         "column_width_cm": CARD_COLUMN_WIDTH_CM,
-        "row_height_cm": round(int(CARD_ROW_HEIGHT_TWIP) / 567.0, 3),
+        "row_height_cm": round(int(card_row_height_twip()) / 567.0, 3),
     })
 
 
