@@ -162,19 +162,6 @@
 
     closeBtn.addEventListener('click', close);
 
-    // 优先用导出的 PDF（和 Word 完全一致），生成失败时回退到 HTML 打印页
-    window.resolvePrintTarget = function(batchId) {
-        var q = batchId ? ('?id=' + encodeURIComponent(batchId)) : '';
-        return fetch('/print-pdf' + q, { method: 'HEAD' })
-            .then(function(r) {
-                if (!r.ok) return { kind: 'sheet', url: '/print-sheet' + q };
-                var name = r.headers.get('X-Pdf-Name');
-                if (name) { try { name = decodeURIComponent(name); } catch (e) {} }
-                return name ? { kind: 'pdf', name: name } : { kind: 'sheet', url: '/print-sheet' + q };
-            })
-            .catch(function() { return { kind: 'sheet', url: '/print-sheet' + q }; });
-    };
-
     window.PrintProgress = {
         open: open,
         update: setProgress,

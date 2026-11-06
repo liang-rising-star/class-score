@@ -586,128 +586,21 @@ def _set_default_printer(name):
         return False
 
 
-def print_pdf_direct(pdf_path, printer="", copies=1):
-    """把 PDF 逐页渲染成位图，直接送打印机队列（不启动任何外部程序）。"""
+def print_docx(docx_path, printer=""):
+    """用本机 Word/WPS 以 100% 比例打印 docx（无窗口、不转 PDF）。"""
     if os.name != "nt":
         raise OSError("仅支持 Windows 打印")
+    if not os.path.isfile(docx_path):
+        raise OSError("导出文件不存在")
 
-    import ctypes
-    from ctypes import wintypes
-    import pypdfium2 as pdfium
-    from PIL import Image
-
-    _, default_printer = list_printers()
-    device = printer or default_printer
-    if not device:
-        raise OSError("没有可用的打印机")
-
-    gdi32 = ctypes.WinDLL("gdi32")
-
-    HORZRES, VERTRES = 8, 10
-    LOGPIXELSX, LOGPIXELSY = 88, 90
-    SRCCOPY = 0x00CC0020
-    DIB_RGB_COLORS = 0
-
-    class DOCINFOW(ctypes.Structure):
-        _fields_ = [("cbSize", ctypes.c_int),
-                    ("lpszDocName", wintypes.LPCWSTR),
-                    ("lpszOutput", wintypes.LPCWSTR),
-                    ("lpszDatatype", wintypes.LPCWSTR),
-                    ("fwType", wintypes.DWORD)]
-
-    class BITMAPINFOHEADER(ctypes.Structure):
-        _fields_ = [("biSize", wintypes.DWORD),
-                    ("biWidth", ctypes.c_long),
-                    ("biHeight", ctypes.c_long),
-                    ("biPlanes", wintypes.WORD),
-                    ("biBitCount", wintypes.WORD),
-                    ("biCompression", wintypes.DWORD),
-                    ("biSizeImage", wintypes.DWORD),
-                    ("biXPelsPerMeter", ctypes.c_long),
-                    ("biYPelsPerMeter", ctypes.c_long),
-                    ("biClrUsed", wintypes.DWORD),
-                    ("biClrImportant", wintypes.DWORD)]
-
-    hdc = gdi32.CreateDCW("WINSPOOL", device, None, None)
-    if not hdc:
-        raise OSError(f"无法连接打印机：{device}")
+    original = ""
+    if printer:
+        _, original = list_printers()
+        if not _set_default_printer(printer):
+            raise OSError(f"无法切换到打印机：{printer}")
 
     try:
-        width_px = gdi32.GetDeviceCaps(hdc, HORZRES)
-        height_px = gdi32.GetDeviceCaps(hdc, VERTRES)
-        dpi = gdi32.GetDeviceCaps(hdc, LOGPIXELSX) or 300
-
-        doc_info = DOCINFOW()
-        doc_info.cbSize = ctypes.sizeof(DOCINFOW)
-        doc_info.lpszDocName = os.path.basename(pdf_path)
-        doc_info.lpszOutput = None
-        doc_info.lpszDatatype = None
-        doc_info.fwType = 0
-
-        if gdi32.StartDocW(hdc, ctypes.byref(doc_info)) <= 0:
-            raise OSError("无法创建打印任务")
-
-        document = pdfium.PdfDocument(pdf_path)
-        try:
-            for _copy in range(max(1, copies)):
-                for index in range(len(document)):
-                    page = document[index]
-                    scale = dpi / 72.0
-                    image = page.render(scale=scale).to_pil().convert("RGB")
-
-                    # 等比缩放到可打印区域（像素尺寸必须等于设备尺寸，否则会按 1:1 像素印成半张）
-                    ratio = min(width_px / image.width, height_px / image.height)
-                    if abs(ratio - 1) > 0.001:
-                        image = image.resize(
-                            (max(1, int(image.width * ratio)), max(1, int(image.height * ratio))),
-                            Image.LANCZOS)
-
-                    w, h = image.size
-                    raw = image.transpose(Image.FLIP_TOP_BOTTOM).tobytes("raw", "BGR")
-                    stride = w * 3
-                    if stride % 4:
-                        pad = 4 - stride % 4
-                        raw = b"".join(
-                            raw[i * stride:(i + 1) * stride] + bytes(pad)
-                            for i in range(h))
-                        stride += pad
-
-                    header = BITMAPINFOHEADER()
-                    header.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-                    header.biWidth = w
-                    header.biHeight = h
-                    header.biPlanes = 1
-                    header.biBitCount = 24
-                    header.biCompression = 0
-                    header.biSizeImage = stride * h
-
-                    buffer = ctypes.create_string_buffer(raw, len(raw))
-
-                    if gdi32.StartPage(hdc) <= 0:
-                        raise OSError("无法开始打印页")
-                    gdi32.StretchDIBits(
-                        hdc, 0, 0, w, h, 0, 0, w, h,
-                        buffer, ctypes.byref(header), DIB_RGB_COLORS, SRCCOPY)
-                    gdi32.EndPage(hdc)
-        finally:
-            document.close()
-            gdi32.EndDoc(hdc)
-    finally:
-        gdi32.DeleteDC(hdc)
-
-    return device
-
-
-def docx_to_pdf(docx_path, pdf_path=None, timeout=90):
-    """用本机 Office/WPS 把 docx 转成 PDF（无窗口），版面与 Word 完全一致。"""
-    if os.name != "nt" or not os.path.isfile(docx_path):
-        return None
-
-    pdf_path = pdf_path or (os.path.splitext(docx_path)[0] + ".pdf")
-    if os.path.exists(pdf_path) and os.path.getmtime(pdf_path) >= os.path.getmtime(docx_path):
-        return pdf_path
-
-    script = f'''
+        script = f'''
 $ErrorActionPreference = "Continue"
 try {{
     $w = New-Object -ComObject Word.Application
@@ -715,43 +608,23 @@ try {{
     $w.DisplayAlerts = 0
     try {{
         $d = $w.Documents.Open("{docx_path}", $false, $true)
-        $d.SaveAs2("{pdf_path}", 17)
+        $d.PrintOut()
+        Start-Sleep -Milliseconds 1500
         $d.Close($false)
     }} finally {{
         try {{ $w.Quit() }} catch {{}}
     }}
 }} catch {{ }}
 '''
-    try:
         import subprocess
         subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, timeout=timeout,
+            capture_output=True, timeout=180,
             creationflags=0x08000000 if os.name == "nt" else 0,
         )
-    except Exception:
-        return None
-
-    if os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 0:
-        return pdf_path
-    return None
-
-
-def export_cards_pdf(codes, class_name, title, amount, issue_date, docx_path):
-    """纯 Python 生成 PDF（不依赖 Office），文件名与 docx 同名。"""
-    import pdf_cards
-
-    pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
-    if os.path.exists(pdf_path) and os.path.getmtime(pdf_path) >= os.path.getmtime(docx_path):
-        return pdf_path
-
-    def barcode_bytes(code):
-        return generate_barcode_image(code).getvalue()
-
-    return pdf_cards.build_cards_pdf(
-        codes, class_name, title, amount, issue_date, pdf_path, barcode_bytes)
-
-
+    finally:
+        if printer and original:
+            _set_default_printer(original)
 def pick_folder(title="选择文件夹"):
     """弹出系统文件夹选择框。
 
@@ -1917,116 +1790,19 @@ def print_now(request: Request, filename: str = Form(None), batch_id: str = Form
 
     printer = (read_config().get("print", {}) or {}).get("printer", "") or ""
 
-    pdf_path = ensure_batch_pdf(batch)
-    if not pdf_path:
-        return {"ok": False, "message": "PDF 生成失败，无法打印"}
+    docx_path = os.path.join(get_output_dir(), name)
+    if not os.path.isfile(docx_path):
+        return {"ok": False, "message": "导出文件不存在"}
 
     try:
-        used = print_pdf_direct(pdf_path, printer)
+        print_docx(docx_path, printer)
     except Exception as exc:
         return {"ok": False, "message": f"打印失败：{exc}"}
 
     history_mark(name, "printed")
+    used = printer or "系统默认打印机"
     return {"ok": True, "message": f"已发送到 {used}"}
 
-
-def ensure_batch_pdf(batch):
-    """按批次数据生成 PDF（纯 Python），返回路径或 None。"""
-    if not batch or not batch.get("codes"):
-        return None
-    filename = os.path.basename((batch.get("filename") or "").replace("\\", "/"))
-    if not filename:
-        return None
-    docx_path = os.path.join(get_output_dir(), filename)
-
-    # 优先用 WPS/Word 转换，版面与 Word 完全一致
-    converted = docx_to_pdf(docx_path)
-    if converted:
-        return converted
-
-    # Office 不可用时退回纯 Python 生成（版面对齐 docx，但细节可能有差异）
-    try:
-        return export_cards_pdf(
-            batch["codes"], batch["class_name"], batch["title"],
-            batch["amount"], batch["issue_date"], docx_path)
-    except Exception:
-        return None
-
-
-# 打印用 PDF：按需把导出目录里的 docx 转成 PDF（同目录同名）
-@app.api_route("/print-pdf", methods=["GET", "HEAD"])
-def print_pdf(request: Request, id: str = None):
-    sid, sess = get_session(request)
-    if not sess:
-        return RedirectResponse(url="/login", status_code=303)
-
-    batch = history_find(id) if id else (sess.get("gen") or {})
-    if not batch:
-        raise HTTPException(status_code=404, detail="没有可打印的批次")
-
-    pdf_path = ensure_batch_pdf(batch)
-    if not pdf_path:
-        raise HTTPException(status_code=500, detail="PDF 生成失败")
-
-    pdf_name = os.path.basename(pdf_path)
-    pdf_header = urllib.parse.quote(pdf_name)      # 中文文件名不能直接进 HTTP 头
-    if request.method == "HEAD":
-        return Response(status_code=200, media_type="application/pdf",
-                        headers={"X-Pdf-Name": pdf_header})
-
-    return FileResponse(pdf_path, filename=pdf_name, media_type="application/pdf",
-                        headers={"X-Pdf-Name": pdf_header})
-
-
-# 打印页：把卡片渲染成 A4 网格，由桌面版静默打印（不经过 WPS/Word）
-@app.get("/print-sheet", response_class=HTMLResponse)
-async def print_sheet(request: Request, id: str = None):
-    sid, sess = get_session(request)
-    if not sess:
-        return RedirectResponse(url="/login")
-
-    result = None
-    if id:
-        batch = history_find(id)
-        if batch and batch.get("codes"):
-            result = dict(batch, system_name=read_config()["system"]["name"])
-    if result is None:
-        result = sess.get("gen")
-    if not result or not result.get("codes"):
-        return RedirectResponse(url="/generate")
-
-    codes = result["codes"]
-    per_page = CARD_ROWS_PER_PAGE * CARD_COLUMNS_PER_PAGE
-    pages = [codes[i:i + per_page] for i in range(0, len(codes), per_page)]
-
-    return render(request, "print_sheet.html", {
-        "system_name": result["system_name"],
-        "class_name": result["class_name"],
-        "title": result["title"],
-        "amount": result["amount"],
-        "issue_date": result["issue_date"],
-        "pages": pages,
-        "column_width_cm": CARD_COLUMN_WIDTH_CM,
-        "row_height_cm": round(int(card_row_height_twip()) / 567.0, 3),
-    })
-
-
-# 条码图片：按编号即时生成 PNG，供打印页引用
-@app.get("/barcode/{code}.png")
-async def barcode_png(request: Request, code: str):
-    sid, sess = get_session(request)
-    if not sess:
-        raise HTTPException(status_code=403, detail="请先登录")
-
-    if not re.fullmatch(r"[A-Za-z0-9_-]{4,64}", code or ""):
-        raise HTTPException(status_code=400, detail="编号格式不正确")
-
-    buf = generate_barcode_image(code)
-    return Response(content=buf.getvalue(), media_type="image/png",
-                    headers={"Cache-Control": "public, max-age=3600"})
-
-
-# 导出目录绝对路径
 def get_output_dir():
     output_dir = read_config()["paths"]["output"]
     if not os.path.isabs(output_dir):
