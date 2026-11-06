@@ -933,8 +933,10 @@ def export_to_word(class_name, title, amount, codes, issue_date):
 
     doc = Document()
 
-    # 设置页面边距
+    # 显式指定 A4（python-docx 默认是 Letter 8.5×11in，打印到 A4 会被缩放并出现大片白边）
     for section in doc.sections:
+        section.page_width = Cm(21.0)
+        section.page_height = Cm(29.7)
         section.left_margin = Cm(1.0)
         section.right_margin = Cm(1.0)
         section.top_margin = Cm(0.5)
