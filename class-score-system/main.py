@@ -1353,19 +1353,129 @@ async def security_middleware(request: Request, call_next):
 _init_notice = None
 
 
-# 初始化管理员页面
+# 初始化第一步：设置管理密码
 @app.get("/", response_class=HTMLResponse)
 async def init_admin(request: Request):
     global _init_notice
     config = read_config()
-    if config["system"]["init_required"]:
-        notice = _init_notice
-        _init_notice = None
-        return render(request, "init_admin.html", {
+    if not config["system"]["init_required"]:
+        return RedirectResponse(url="/login")
+
+    sid, sess = get_session(request)
+    if sess and sess.get("pending_admin"):
+        return render(request, "init_data_source.html", {
             "system_name": config["system"]["name"],
-            "notice": notice,
+            "username": sess["pending_admin"]["username"],
+            "notice": _init_notice,
+            "error": None,
         })
-    return RedirectResponse(url="/login")
+
+    # 首次启动先打招呼，点「开始体验」再进入两步设置
+    if not (sess and sess.get("welcomed")):
+        return render(request, "welcome.html", {
+            "system_name": config["system"]["name"],
+        })
+
+    notice = _init_notice
+    _init_notice = None
+    return render(request, "init_admin.html", {
+        "system_name": config["system"]["name"],
+        "notice": notice,
+        "error": None,
+    })
+
+
+# 欢迎页「开始体验」：记下已看过欢迎页，进入第一步设置密码
+@app.post("/welcome/done")
+async def welcome_done(request: Request, csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+
+    sid, sess = get_session(request)
+    if sess:
+        sess["welcomed"] = True
+        return RedirectResponse(url="/", status_code=303)
+
+    sid = secrets.token_hex(32)
+    sessions[sid] = {"user": None, "expires": time.time() + SESSION_TTL, "welcomed": True}
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(SESSION_COOKIE, sid, httponly=True, samesite="lax",
+                        secure=_is_https(request), max_age=SESSION_TTL)
+    return response
+
+
+# 初始化第一步提交：先记住管理员账号，进入第二步选择数据来源
+@app.post("/init_admin/credentials")
+async def init_credentials(request: Request, username: str = Form(""),
+                           password: str = Form(""), password2: str = Form(""),
+                           csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    config = read_config()
+    if not config["system"].get("init_required"):
+        raise HTTPException(status_code=403, detail="系统已初始化，请直接登录")
+
+    system_name = config["system"]["name"]
+    username = (username or "").strip()
+
+    def back(error):
+        return render(request, "init_admin.html", {
+            "system_name": system_name, "error": error, "notice": None,
+            "username": username,
+        })
+
+    if not 1 <= len(username) <= 32:
+        return back("用户名长度需为 1-32 个字符")
+    if len(password or "") < 4:
+        return back("密码至少 4 位")
+    if password2 and password != password2:
+        return back("两次输入的密码不一致")
+
+    sid = secrets.token_hex(32)
+    sessions[sid] = {
+        "user": None,
+        "expires": time.time() + SESSION_TTL,
+        "welcomed": True,
+        "pending_admin": {"username": username, "password": hash_password(password)},
+    }
+
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(SESSION_COOKIE, sid, httponly=True, samesite="lax",
+                        secure=_is_https(request), max_age=SESSION_TTL)
+    return response
+
+
+# 初始化第二步：用「新建数据库」完成初始化
+@app.post("/init_admin/complete")
+async def init_complete(request: Request, csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    config = read_config()
+    if not config["system"].get("init_required"):
+        raise HTTPException(status_code=403, detail="系统已初始化，请直接登录")
+
+    sid, sess = get_session(request)
+    if not sess or not sess.get("pending_admin"):
+        return RedirectResponse(url="/", status_code=303)
+
+    return _apply_pending_admin(request, sess)
+
+
+def _apply_pending_admin(request: Request, sess):
+    """把第一步暂存的管理员写入配置，直接登录进入控制台。"""
+    pending = sess.get("pending_admin") or {}
+
+    config = read_config()
+    config["admin"]["username"] = pending.get("username", "admin")
+    config["admin"]["password"] = pending.get("password", "")
+    config["system"]["init_required"] = False
+    write_config(config)
+
+    sid = secrets.token_hex(32)
+    sessions[sid] = {"user": pending.get("username", "admin"),
+                     "expires": time.time() + SESSION_TTL}
+
+    response = RedirectResponse(url="/index", status_code=303)
+    response.set_cookie(SESSION_COOKIE, sid, httponly=True, samesite="lax",
+                        secure=_is_https(request), max_age=SESSION_TTL)
+    return response
 
 # 从 2.x 旧版本导入数据库（仅首次初始化时可用）
 SOUND_OK_KEYS = {"bell", "blip", "chime", "coin", "bubble", "xylophone", "drop",
@@ -1408,8 +1518,13 @@ def import_legacy(request: Request, legacy_path: str = Form(None),
 
     target = "/" if init_mode else "/setting"
 
+    pending = bool(sess and sess.get("pending_admin"))
+
     def finish(kind, text):
         if init_mode:
+            # 第二步已设置好管理员：导入成功后直接完成初始化并进入控制台
+            if pending and kind == "success":
+                return _apply_pending_admin(request, sess)
             return _finish_init_notice(kind, text)
         sess["notice"] = {"kind": kind, "text": text}
         return RedirectResponse(url=target, status_code=303)
@@ -1454,6 +1569,8 @@ def _finish_init_notice(kind, text):
 @app.post("/init_admin")
 async def submit_init_admin(request: Request, username: str = Form(...), password: str = Form(...),
                             csrf_token: str = Form(None)):
+    return await init_credentials(request, username, password, "", csrf_token)
+    # 旧表单兼容：等价于第一步提交（下方逻辑保留，不再执行）
     check_csrf(request, csrf_token)
     config = read_config()
     # 只在尚未初始化时允许设置管理员，防止匿名用户覆盖已有账号

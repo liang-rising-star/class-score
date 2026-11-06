@@ -38,6 +38,14 @@
                     <span class="scan-hint" id="scanHint">等待扫描…</span>
                 </div>
 
+                <div class="scan-toolbar">
+                    <span class="scan-toolbar__tip">扫一张核销一张，结果显示在下方</span>
+                    <div class="scan-toolbar__actions">
+                        <a class="btn btn-ghost btn-sm" href="/setting#sound-card">音效设置</a>
+                        <button type="button" class="btn btn-ghost btn-sm btn-sm--danger" id="clearScans">清空记录</button>
+                    </div>
+                </div>
+
                 <div class="result-sheet" id="scanSheet" hidden>
                     <div class="result-sheet__head">
                         <span class="result-sheet__title">
@@ -54,9 +62,6 @@
                                 <span class="summary-chip summary-chip--bad" id="scanBadChip" hidden>未通过 <b id="scanBad">0</b></span>
                                 <span class="summary-chip" id="scanCountChip">共 <b id="scanTotal">0</b> 条</span>
                             </div>
-                            <a class="sheet-link" href="/setting#sound-card" title="到设置里更换提示音">音效设置</a>
-                            <button type="button" class="sheet-link sheet-link--danger" id="clearScans"
-                                    title="清空本次核销记录">清空记录</button>
                         </div>
                     </div>
 
@@ -287,7 +292,6 @@
     var clearBtn = document.getElementById('clearScans');
     if (clearBtn) {
         clearBtn.addEventListener('click', function() {
-            if (list.children.length && !confirm('清空本次核销记录？（已核销的卡不会恢复）')) return;
             list.innerHTML = '';
             index = 0; okCount = 0; badCount = 0; totalAmount = 0;
             refresh();

@@ -300,6 +300,37 @@ img,
     color: #fff;
 }
 
+/* 扫码工具栏：始终可见的设置 / 清空按钮 */
+.scan-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.scan-toolbar__tip {
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
+.scan-toolbar__actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-sm--danger {
+    color: #b91c1c;
+    border-color: #fecaca;
+}
+
+.btn-sm--danger:hover {
+    color: #991b1b;
+    background: #fef2f2;
+    border-color: #fca5a5;
+}
+
 /* 扫码结果面板：沿用批量核销的 result-sheet，仅限制高度 */
 #scanList {
     max-height: 420px;
@@ -368,6 +399,230 @@ img,
     color: #b91c1c;
     border-color: #fca5a5;
     background: #fef2f2;
+}
+
+/* 欢迎页 */
+.welcome-card {
+    text-align: center;
+}
+
+.welcome-card {
+    padding: 26px 26px 20px;
+}
+
+.welcome-hero {
+    padding: 0 0 16px;
+}
+
+.welcome-logo {
+    width: 58px;
+    height: 58px;
+    margin-bottom: 10px;
+}
+
+.welcome-title {
+    font-size: 21px;
+    font-weight: 750;
+    color: var(--text-strong);
+    letter-spacing: -.01em;
+}
+
+.welcome-sub {
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--text-muted);
+}
+
+.welcome-points {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 18px;
+    text-align: left;
+}
+
+.welcome-point {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 9px 12px;
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.welcome-point__icon {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.welcome-point b {
+    display: block;
+    font-size: 13.5px;
+    color: var(--text-strong);
+    margin-bottom: 2px;
+}
+
+.welcome-point span {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+
+.welcome-cta {
+    height: 46px;
+    font-size: 14.5px;
+    font-weight: 650;
+    letter-spacing: .01em;
+}
+
+/* 初始化向导：步骤条与数据来源选择 */
+.auth-card--wide {
+    max-width: 520px;
+}
+
+.auth-steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 20px;
+    padding: 0;
+    list-style: none;
+}
+
+.auth-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: 1;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.auth-step__no {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    background: #fff;
+    border: 1px solid var(--border-strong);
+    border-radius: 50%;
+}
+
+.auth-step.is-active {
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+    border-color: rgba(37, 99, 235, .35);
+    font-weight: 600;
+}
+
+.auth-step.is-active .auth-step__no {
+    color: #fff;
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+.auth-step.is-done .auth-step__no {
+    color: #fff;
+    background: #16a34a;
+    border-color: #16a34a;
+}
+
+.choice-form {
+    margin-bottom: 10px;
+}
+
+.choice-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 16px;
+    text-align: left;
+    font-family: inherit;
+    background: #fff;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: border-color .16s, box-shadow .16s, transform .12s;
+}
+
+.choice-card:hover {
+    border-color: var(--primary);
+    box-shadow: 0 10px 24px rgba(37, 99, 235, .12);
+}
+
+.choice-card:active {
+    transform: translateY(1px);
+}
+
+.choice-card__icon {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border-radius: 12px;
+}
+
+.choice-card__icon--alt {
+    color: #0f766e;
+    background: #ccfbf1;
+}
+
+.choice-card__body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.choice-card__title {
+    font-size: 15px;
+    font-weight: 650;
+    color: var(--text-strong);
+}
+
+.choice-card__desc {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.choice-card__go {
+    flex: 0 0 auto;
+    color: var(--text-faint);
+}
+
+.choice-card:hover .choice-card__go {
+    color: var(--primary);
+}
+
+.choice-tip {
+    margin: 6px 2px 14px;
+    font-size: 12px;
+    color: var(--text-faint);
+    line-height: 1.6;
 }
 
 /* 隐藏浏览器右侧滚动条（滚轮/触控板照常滚动） */
