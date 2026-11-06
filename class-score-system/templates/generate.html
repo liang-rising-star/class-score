@@ -189,8 +189,7 @@
 // 生成结果面板的「直接打印」
 (function() {
     var btn = document.getElementById('printBtn');
-    var form = document.getElementById('printForm');
-    if (!btn || !form) return;
+    if (!btn) return;
 
     var bridge = function() {
         return (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects)
