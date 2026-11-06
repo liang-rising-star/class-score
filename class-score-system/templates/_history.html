@@ -186,53 +186,30 @@
         if (!row) return;
 
         if (printBtn) {
-            var b = bridge();
-            if (!b) {                                   // 网页版：交给系统打印，由服务端标记
-                var form = row.querySelector('.history-print-form');
-                if (form) form.submit();
-                return;
-            }
             printBtn.disabled = true;
             printBtn.textContent = '打印中…';
-            pendingPrint = { batchId: printBtn.dataset.batch, row: row };
+            if (window.PrintProgress) window.PrintProgress.open('准备打印任务…');
 
-            if (window.PrintProgress) window.PrintProgress.open('正在生成该批次的 PDF…');
+            var csrfField = document.querySelector('input[name="csrf_token"]');
+            var body = new URLSearchParams({ csrf_token: csrfField ? csrfField.value : '' });
+            body.append('batch_id', printBtn.dataset.batch);
 
-            var resolve = window.resolvePrintTarget || function(id) {
-                return Promise.resolve({ kind: 'sheet', url: '/print-sheet?id=' + encodeURIComponent(id) });
-            };
-            var viaPdf = false;
-            resolve(printBtn.dataset.batch)
-                .then(function(t) {
-                    viaPdf = (t.kind === 'pdf');
-                    if (viaPdf) {
-                        if (window.PrintProgress) window.PrintProgress.update(60, '正在发送到打印机…');
-                        return b.PrintPdf(t.name, printBtn.dataset.printer || '');
-                    }
-                    return b.PrintUrl(location.origin + t.url, printBtn.dataset.printer || '', printBtn.dataset.batch);
-                })
-                .then(function(r) {
-                var queued = !!r && r.indexOf('queued') === 0;
-                if (viaPdf) {
-                    // 系统打印没有后续回执，发送成功即视为完成
-                    if (queued) {
-                        pendingPrint = null;
-                        if (window.PrintProgress) window.PrintProgress.finish(true, '已发送到打印机');
-                        post('/history/' + printBtn.dataset.batch + '/printed').then(function() { dropRow(row); });
-                    } else {
-                        pendingPrint = null;
-                        resetPrint(printBtn);
-                        if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + r);
-                    }
-                    return;
-                }
-                if (!queued) {
-                    pendingPrint = null;
+            fetch('/print-now', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString()
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d && d.ok) {
+                    if (window.PrintProgress) window.PrintProgress.finish(true, d.message || '已发送到打印机');
+                    dropRow(row);
+                } else {
                     resetPrint(printBtn);
-                    if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + r);
+                    if (window.PrintProgress) window.PrintProgress.finish(false, (d && d.message) || '打印失败');
                 }
-            }).catch(function(err) {
-                pendingPrint = null;
+            })
+            .catch(function(err) {
                 resetPrint(printBtn);
                 if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + err);
             });

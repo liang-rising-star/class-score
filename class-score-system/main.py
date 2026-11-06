@@ -577,6 +577,47 @@ def _set_default_printer(name):
         return False
 
 
+def print_docx(docx_path, printer=""):
+    """用本机 Office/WPS 以 100% 比例直接打印 docx（不经 PDF 阅读器，不会额外加边距/缩放）。"""
+    if os.name != "nt":
+        raise OSError("仅支持 Windows 打印")
+    if not os.path.isfile(docx_path):
+        raise OSError("导出文件不存在")
+
+    original = ""
+    if printer:
+        _, original = list_printers()
+        if not _set_default_printer(printer):
+            raise OSError(f"无法切换到打印机：{printer}")
+
+    try:
+        script = f'''
+$ErrorActionPreference = "Continue"
+try {{
+    $w = New-Object -ComObject Word.Application
+    $w.Visible = $false
+    $w.DisplayAlerts = 0
+    try {{
+        $d = $w.Documents.Open("{docx_path}", $false, $true)
+        $d.PrintOut()
+        Start-Sleep -Milliseconds 1500
+        $d.Close($false)
+    }} finally {{
+        try {{ $w.Quit() }} catch {{}}
+    }}
+}} catch {{ }}
+'''
+        import subprocess
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, timeout=180,
+            creationflags=0x08000000 if os.name == "nt" else 0,
+        )
+    finally:
+        if printer and original:
+            _set_default_printer(original)
+
+
 def send_to_printer(filepath, printer=""):
     """打印 docx；printer 为空则用系统默认打印机。返回实际使用的打印机名。"""
     if os.name != "nt":
@@ -937,11 +978,10 @@ def export_to_word(class_name, title, amount, codes, issue_date):
     for section in doc.sections:
         section.page_width = Cm(21.0)
         section.page_height = Cm(29.7)
-        # 上下边距不能小于打印机的不可打印区（约 4-5mm），否则最外圈框线会被裁掉
         section.left_margin = Cm(1.0)
         section.right_margin = Cm(1.0)
-        section.top_margin = Cm(1.2)
-        section.bottom_margin = Cm(1.2)
+        section.top_margin = Cm(0.5)
+        section.bottom_margin = Cm(0.5)
 
     # 每页 CARD_ROWS_PER_PAGE 行 × CARD_COLUMNS_PER_PAGE 列
     rows_per_page = CARD_ROWS_PER_PAGE
@@ -1794,6 +1834,41 @@ async def history_delete(request: Request, batch_id: str, csrf_token: str = Form
     sess["gen_notice"] = {"kind": "success", "text": "已删除该批次及其导出文件"}
     target = "/generate_result" if sess.get("gen") else "/generate"
     return RedirectResponse(url=target, status_code=303)
+
+
+# 直接打印：用 Office/WPS 100% 打印 docx，同时把 PDF 归档到 output
+@app.post("/print-now")
+def print_now(request: Request, filename: str = Form(None), batch_id: str = Form(None),
+              csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        raise HTTPException(status_code=403, detail="请先登录")
+
+    if not filename and batch_id:
+        batch = history_find(batch_id)
+        filename = (batch or {}).get("filename")
+    if not filename:
+        filename = (sess.get("gen") or {}).get("filename")
+    if not filename:
+        return {"ok": False, "message": "没有可打印的批次"}
+
+    name = os.path.basename(filename.replace("\\", "/"))
+    docx_path = os.path.join(get_output_dir(), name)
+    if not os.path.isfile(docx_path):
+        return {"ok": False, "message": "导出文件不存在"}
+
+    printer = (read_config().get("print", {}) or {}).get("printer", "") or ""
+    try:
+        print_docx(docx_path, printer)
+    except Exception as exc:
+        return {"ok": False, "message": f"打印失败：{exc}"}
+
+    history_mark(name, "printed")
+    docx_to_pdf(docx_path)          # 同时把 PDF 归档到导出目录（失败不影响打印）
+
+    used = printer or "系统默认打印机"
+    return {"ok": True, "message": f"已发送到 {used}"}
 
 
 # 打印用 PDF：按需把导出目录里的 docx 转成 PDF（同目录同名）

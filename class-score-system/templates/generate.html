@@ -231,62 +231,48 @@
         });
     }
 
-    btn.addEventListener('click', function() {
-        var b = bridge();
-        if (window.PrintProgress) window.PrintProgress.open();
+    var csrf = document.querySelector('input[name="csrf_token"]')
+        ? document.querySelector('input[name="csrf_token"]').value : '';
 
-        if (!b) {
-            // 网页版：交给系统打印
-            if (window.PrintProgress) {
-                var v = 4;
-                var timer = setInterval(function() {
-                    v = Math.min(70, v + 8);
-                    window.PrintProgress.update(v, '正在交给系统打印…');
-                }, 180);
-                setTimeout(function() {
-                    clearInterval(timer);
-                    window.PrintProgress.finish(true, '已交由系统打印，请确认打印机');
-                }, 900);
+    var ticker = null;
+    function startTicker() {
+        var steps = [[12, '准备打印任务…'], [35, '打开导出文档…'], [62, '发送到打印机…'], [85, '等待打印队列接收…']];
+        var i = 0;
+        if (window.PrintProgress) window.PrintProgress.update(steps[0][0], steps[0][1]);
+        ticker = setInterval(function() {
+            if (i < steps.length - 1) {
+                i++;
+                if (window.PrintProgress) window.PrintProgress.update(steps[i][0], steps[i][1]);
             }
-            form.submit();
-            return;
-        }
+        }, 700);
+    }
+    function stopTicker() { if (ticker) { clearInterval(ticker); ticker = null; } }
 
-        var btnEl = btn;
-        btnEl.disabled = true;
-        window.PrintProgress.onDone('main', function() { btnEl.disabled = false; });
-        window.PrintProgress.update(12, '正在生成 PDF…');
+    // 直接用 Office/WPS 以 100% 比例打印 docx，不经过 PDF 阅读器（避免额外边距与缩放）
+    btn.addEventListener('click', function() {
+        if (window.PrintProgress) window.PrintProgress.open('准备打印任务…');
+        btn.disabled = true;
+        startTicker();
 
-        var viaPdf = false;
-        window.resolvePrintTarget('')
-            .then(function(t) {
-                viaPdf = (t.kind === 'pdf');
-                if (viaPdf) {
-                    window.PrintProgress.update(60, '正在发送到打印机…');
-                    return b.PrintPdf(t.name, btnEl.dataset.printer || '');
-                }
-                return b.PrintUrl(location.origin + t.url, btnEl.dataset.printer || '', 'main');
-            })
-            .then(function(r) {
-                var queued = !!r && r.indexOf('queued') === 0;
-                // PDF 走系统打印，没有后续进度消息，这里直接收尾
-                if (viaPdf) {
-                    btnEl.disabled = false;
-                    if (window.PrintProgress) {
-                        if (queued) window.PrintProgress.finish(true, '已发送到打印机');
-                        else window.PrintProgress.finish(false, '打印失败：' + r);
-                    }
-                    return;
-                }
-                if (!queued) {
-                    btnEl.disabled = false;
-                    if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + r);
-                }
-            })
-            .catch(function(err) {
-                btnEl.disabled = false;
-                if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + err);
-            });
+        var body = new URLSearchParams({ csrf_token: csrf });
+        if (currentBatch) body.append('batch_id', currentBatch);
+
+        fetch('/print-now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            stopTicker();
+            btn.disabled = false;
+            if (window.PrintProgress) window.PrintProgress.finish(!!d.ok, d.message || (d.ok ? '已发送到打印机' : '打印失败'));
+        })
+        .catch(function(err) {
+            stopTicker();
+            btn.disabled = false;
+            if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + err);
+        });
     });
 })();
 </script>
