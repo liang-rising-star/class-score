@@ -937,10 +937,11 @@ def export_to_word(class_name, title, amount, codes, issue_date):
     for section in doc.sections:
         section.page_width = Cm(21.0)
         section.page_height = Cm(29.7)
+        # 上下边距不能小于打印机的不可打印区（约 4-5mm），否则最外圈框线会被裁掉
         section.left_margin = Cm(1.0)
         section.right_margin = Cm(1.0)
-        section.top_margin = Cm(0.5)
-        section.bottom_margin = Cm(0.5)
+        section.top_margin = Cm(1.2)
+        section.bottom_margin = Cm(1.2)
 
     # 每页 CARD_ROWS_PER_PAGE 行 × CARD_COLUMNS_PER_PAGE 列
     rows_per_page = CARD_ROWS_PER_PAGE
