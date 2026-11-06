@@ -737,6 +737,37 @@ def print_pdf_direct(pdf_path, printer="", copies=1):
     return device
 
 
+OFFICE_MISSING_MESSAGE = "未检测到 WPS 或 Office，请安装 WPS 或 Office 软件之后再尝试打印。"
+
+_office_state = None
+
+
+def office_available():
+    """检查本机是否装了 Word/WPS（查 COM 注册，不启动进程）。"""
+    global _office_state
+    if _office_state is not None:
+        return _office_state
+
+    if os.name != "nt":
+        _office_state = False
+        return _office_state
+
+    try:
+        import winreg
+        for prog_id in ("Word.Application", "KWPS.Application"):
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id):
+                    _office_state = True
+                    return _office_state
+            except OSError:
+                continue
+    except Exception:
+        pass
+
+    _office_state = False
+    return _office_state
+
+
 def ensure_batch_pdf(batch):
     """按批次数据生成 PDF（纯 Python），返回路径或 None。"""
     if not batch or not batch.get("codes"):
@@ -746,18 +777,10 @@ def ensure_batch_pdf(batch):
         return None
     docx_path = os.path.join(get_output_dir(), filename)
 
-    # 优先用 WPS/Word 转换，版面与 Word 完全一致
-    converted = docx_to_pdf(docx_path)
-    if converted:
-        return converted
-
-    # Office 不可用时退回纯 Python 生成（版面对齐 docx，但细节可能有差异）
-    try:
-        return export_cards_pdf(
-            batch["codes"], batch["class_name"], batch["title"],
-            batch["amount"], batch["issue_date"], docx_path)
-    except Exception:
+    if not office_available():
         return None
+
+    return docx_to_pdf(docx_path)
 
 
 # 打印用 PDF：按需把导出目录里的 docx 转成 PDF（同目录同名）
@@ -1928,9 +1951,12 @@ def print_now(request: Request, filename: str = Form(None), batch_id: str = Form
 
     printer = (read_config().get("print", {}) or {}).get("printer", "") or ""
 
+    if not office_available():
+        return {"ok": False, "message": OFFICE_MISSING_MESSAGE}
+
     pdf_path = ensure_batch_pdf(batch)
     if not pdf_path:
-        return {"ok": False, "message": "PDF 生成失败，无法打印"}
+        return {"ok": False, "message": "打印页面生成失败，请确认 WPS/Office 能正常打开导出的 Word 文档"}
 
     try:
         used = print_pdf_direct(pdf_path, printer)
