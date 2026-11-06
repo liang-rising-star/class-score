@@ -337,7 +337,13 @@ CREATE TABLE scores (
 
 ## 📄 开源协议
 
-本项目基于 [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html) 开源。
+本项目基于 **GNU General Public License v3.0** 发布，完整协议文本见仓库根目录的 [LICENSE](LICENSE) 文件。
+
+- 你可以自由使用、修改、分发本程序，包括商业用途
+- 分发修改版时必须同样以 GPL-3.0 开源，并提供完整源代码
+- 本程序不含任何担保
+
+协议原文：<https://www.gnu.org/licenses/gpl-3.0.html>
 
 ---
 
