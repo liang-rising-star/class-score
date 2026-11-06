@@ -586,6 +586,118 @@ def _set_default_printer(name):
         return False
 
 
+def print_pdf_direct(pdf_path, printer="", copies=1):
+    """把 PDF 逐页渲染成位图，直接送打印机队列（不启动任何外部程序）。"""
+    if os.name != "nt":
+        raise OSError("仅支持 Windows 打印")
+
+    import ctypes
+    from ctypes import wintypes
+    import pypdfium2 as pdfium
+    from PIL import Image
+
+    _, default_printer = list_printers()
+    device = printer or default_printer
+    if not device:
+        raise OSError("没有可用的打印机")
+
+    gdi32 = ctypes.WinDLL("gdi32")
+
+    HORZRES, VERTRES = 8, 10
+    LOGPIXELSX, LOGPIXELSY = 88, 90
+    SRCCOPY = 0x00CC0020
+    DIB_RGB_COLORS = 0
+
+    class DOCINFOW(ctypes.Structure):
+        _fields_ = [("cbSize", ctypes.c_int),
+                    ("lpszDocName", wintypes.LPCWSTR),
+                    ("lpszOutput", wintypes.LPCWSTR),
+                    ("lpszDatatype", wintypes.LPCWSTR),
+                    ("fwType", wintypes.DWORD)]
+
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [("biSize", wintypes.DWORD),
+                    ("biWidth", ctypes.c_long),
+                    ("biHeight", ctypes.c_long),
+                    ("biPlanes", wintypes.WORD),
+                    ("biBitCount", wintypes.WORD),
+                    ("biCompression", wintypes.DWORD),
+                    ("biSizeImage", wintypes.DWORD),
+                    ("biXPelsPerMeter", ctypes.c_long),
+                    ("biYPelsPerMeter", ctypes.c_long),
+                    ("biClrUsed", wintypes.DWORD),
+                    ("biClrImportant", wintypes.DWORD)]
+
+    hdc = gdi32.CreateDCW("WINSPOOL", device, None, None)
+    if not hdc:
+        raise OSError(f"无法连接打印机：{device}")
+
+    try:
+        width_px = gdi32.GetDeviceCaps(hdc, HORZRES)
+        height_px = gdi32.GetDeviceCaps(hdc, VERTRES)
+        dpi = gdi32.GetDeviceCaps(hdc, LOGPIXELSX) or 300
+
+        doc_info = DOCINFOW()
+        doc_info.cbSize = ctypes.sizeof(DOCINFOW)
+        doc_info.lpszDocName = os.path.basename(pdf_path)
+        doc_info.lpszOutput = None
+        doc_info.lpszDatatype = None
+        doc_info.fwType = 0
+
+        if gdi32.StartDocW(hdc, ctypes.byref(doc_info)) <= 0:
+            raise OSError("无法创建打印任务")
+
+        document = pdfium.PdfDocument(pdf_path)
+        try:
+            for _copy in range(max(1, copies)):
+                for index in range(len(document)):
+                    page = document[index]
+                    scale = dpi / 72.0
+                    image = page.render(scale=scale).to_pil().convert("RGB")
+
+                    # 等比缩放到可打印区域（像素尺寸必须等于设备尺寸，否则会按 1:1 像素印成半张）
+                    ratio = min(width_px / image.width, height_px / image.height)
+                    if abs(ratio - 1) > 0.001:
+                        image = image.resize(
+                            (max(1, int(image.width * ratio)), max(1, int(image.height * ratio))),
+                            Image.LANCZOS)
+
+                    w, h = image.size
+                    raw = image.transpose(Image.FLIP_TOP_BOTTOM).tobytes("raw", "BGR")
+                    stride = w * 3
+                    if stride % 4:
+                        pad = 4 - stride % 4
+                        raw = b"".join(
+                            raw[i * stride:(i + 1) * stride] + bytes(pad)
+                            for i in range(h))
+                        stride += pad
+
+                    header = BITMAPINFOHEADER()
+                    header.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+                    header.biWidth = w
+                    header.biHeight = h
+                    header.biPlanes = 1
+                    header.biBitCount = 24
+                    header.biCompression = 0
+                    header.biSizeImage = stride * h
+
+                    buffer = ctypes.create_string_buffer(raw, len(raw))
+
+                    if gdi32.StartPage(hdc) <= 0:
+                        raise OSError("无法开始打印页")
+                    gdi32.StretchDIBits(
+                        hdc, 0, 0, w, h, 0, 0, w, h,
+                        buffer, ctypes.byref(header), DIB_RGB_COLORS, SRCCOPY)
+                    gdi32.EndPage(hdc)
+        finally:
+            document.close()
+            gdi32.EndDoc(hdc)
+    finally:
+        gdi32.DeleteDC(hdc)
+
+    return device
+
+
 def print_docx(docx_path, printer=""):
     """用本机 Office/WPS 以 100% 比例直接打印 docx（不经 PDF 阅读器，不会额外加边距/缩放）。"""
     if os.name != "nt":
@@ -1868,15 +1980,17 @@ def print_now(request: Request, filename: str = Form(None), batch_id: str = Form
         return {"ok": False, "message": "导出文件不存在"}
 
     printer = (read_config().get("print", {}) or {}).get("printer", "") or ""
+
+    pdf_path = docx_to_pdf(docx_path)
+    if not pdf_path:
+        return {"ok": False, "message": "PDF 生成失败，无法打印"}
+
     try:
-        print_docx(docx_path, printer)
+        used = print_pdf_direct(pdf_path, printer)
     except Exception as exc:
         return {"ok": False, "message": f"打印失败：{exc}"}
 
     history_mark(name, "printed")
-    docx_to_pdf(docx_path)          # 同时把 PDF 归档到导出目录（失败不影响打印）
-
-    used = printer or "系统默认打印机"
     return {"ok": True, "message": f"已发送到 {used}"}
 
 
