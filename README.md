@@ -335,6 +335,13 @@ CREATE TABLE scores (
 > 打印版式（列数/行数/行高）是 `main.py` 顶部的 `CARD_*` 常量，不再放在配置里 ——
 > 旧的 `printing` 段已废弃，保留也不会生效。
 
+## 👤 作者
+
+**liang-rising-star** — 项目发起与主要开发者
+
+- 仓库：<https://github.com/liang-rising-star/class-score>
+- 问题反馈：<https://github.com/liang-rising-star/class-score/issues>
+
 ## 📄 开源协议
 
 本项目基于 **GNU General Public License v3.0** 发布，完整协议文本见仓库根目录的 [LICENSE](LICENSE) 文件。

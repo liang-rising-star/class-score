@@ -1,3 +1,7 @@
+// 班级积分管理系统 —— 桌面外壳
+// Copyright (C) 2026 liang-rising-star
+// 本程序依据 GNU GPL v3 发布，不含任何担保；详见仓库根目录的 LICENSE。
+
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;

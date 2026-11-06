@@ -1,3 +1,10 @@
+# 班级积分管理系统 —— 班级积分卡生成与核销
+# Copyright (C) 2026 liang-rising-star
+#
+# 本程序为自由软件：你可以依据 GNU 通用公共许可证（GPL）第 3 版
+# 或（由你选择）任何更新版本发布，重新分发和/或修改本程序。
+# 本程序不含任何担保，详见仓库根目录的 LICENSE 文件。
+
 from fastapi import FastAPI, Request, Form, HTTPException, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
