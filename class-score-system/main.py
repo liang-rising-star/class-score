@@ -28,6 +28,7 @@ app = FastAPI()
 
 # 获取当前文件所在目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_VERSION = "3.0"
 
 # 配置静态文件
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
@@ -58,6 +59,7 @@ def render(request: Request, template_name: str, context: dict = None) -> HTMLRe
     ctx = dict(context or {})
     ctx.setdefault("csrf_token", getattr(request.state, "csrf_token", ""))
     ctx.setdefault("css_version", asset_version())
+    ctx.setdefault("app_version", APP_VERSION)
     html = template.render(**ctx)
     return HTMLResponse(html, headers={
         "Cache-Control": "no-store, no-cache, must-revalidate",
