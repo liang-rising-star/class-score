@@ -1728,6 +1728,18 @@ def history_mark_printed(request: Request, batch_id: str, csrf_token: str = Form
     return Response(status_code=204)
 
 
+@app.post("/history/{batch_id}/saved")
+def history_mark_saved(request: Request, batch_id: str, csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return Response(status_code=403)
+
+    if history_find(batch_id):
+        history_patch(batch_id, saved=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    return Response(status_code=204)
+
+
 @app.post("/history/{batch_id}/delete")
 async def history_delete(request: Request, batch_id: str, csrf_token: str = Form(None)):
     check_csrf(request, csrf_token)

@@ -14,7 +14,7 @@
 
     <ul class="history-list">
         {% for item in history %}
-        <li class="history-row">
+        <li class="history-row" data-id="{{ item.id }}">
             <div class="history-main">
                 <div class="history-title">{{ item.class_name }} · {{ item.title }}</div>
                 <div class="history-meta">{{ item.quantity }} 张 · {{ item.amount }} 分 · {{ item.created_at }}</div>
@@ -24,18 +24,112 @@
                 <button type="button" class="btn btn-sm history-print"
                         data-batch="{{ item.id }}"
                         data-printer="{{ printer_value }}">打印</button>
-                <a class="btn btn-ghost btn-sm" href="/download/{{ item.filename }}">保存</a>
+                <button type="button" class="btn btn-ghost btn-sm history-save"
+                        data-batch="{{ item.id }}"
+                        data-file="{{ item.filename }}">保存</button>
                 <form action="/print" method="post" class="history-print-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="filename" value="{{ item.filename }}">
                 </form>
-                <form action="/history/{{ item.id }}/delete" method="post">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button type="submit" class="btn btn-ghost btn-sm history-delete">删除</button>
-                </form>
+                <button type="button" class="btn btn-ghost btn-sm history-delete"
+                        data-batch="{{ item.id }}">删除</button>
             </div>
         </li>
         {% endfor %}
     </ul>
 </section>
 {% endif %}
+
+<script>
+// 待处理批次：打印 / 保存 / 删除之后立即从列表移除，不刷新整页
+(function() {
+    var card = document.querySelector('.history-card');
+    if (!card) return;
+
+    var csrfInput = document.querySelector('input[name="csrf_token"]');
+    var csrf = csrfInput ? csrfInput.value : '';
+
+    function bridge() {
+        return (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects)
+            ? window.chrome.webview.hostObjects.desktopBridge : null;
+    }
+
+    function post(url) {
+        var body = new URLSearchParams({ csrf_token: csrf });
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        });
+    }
+
+    function dropRow(row) {
+        row.classList.add('is-removing');
+        setTimeout(function() {
+            row.remove();
+            if (!card.querySelector('.history-row')) card.remove();
+        }, 200);
+    }
+
+    function startDownload(filename) {
+        var a = document.createElement('a');
+        a.href = '/download/' + encodeURIComponent(filename);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
+
+    card.addEventListener('click', function(e) {
+        var printBtn = e.target.closest('.history-print');
+        var saveBtn = e.target.closest('.history-save');
+        var delBtn = e.target.closest('.history-delete');
+        var row = e.target.closest('.history-row');
+        if (!row) return;
+
+        if (printBtn) {
+            var b = bridge();
+            if (!b) {                              // 网页版：交系统打印（表单已存在时走表单）
+                var form = row.querySelector('.history-print-form');
+                if (form) { form.submit(); return; }
+                post('/history/' + printBtn.dataset.batch + '/printed')
+                    .then(function(){ dropRow(row); });
+                return;
+            }
+            printBtn.disabled = true;
+            printBtn.textContent = '打印中…';
+            var url = location.origin + '/print-sheet?id=' + encodeURIComponent(printBtn.dataset.batch);
+            b.PrintUrl(url, printBtn.dataset.printer || '').then(function(r) {
+                if (r && r.indexOf('queued') === 0) {
+                    post('/history/' + printBtn.dataset.batch + '/printed').then(function() { dropRow(row); });
+                } else {
+                    printBtn.disabled = false;
+                    printBtn.textContent = '打印';
+                    alert('打印失败：' + r);
+                }
+            }).catch(function(err) {
+                printBtn.disabled = false;
+                printBtn.textContent = '打印';
+                alert('打印失败：' + err);
+            });
+            return;
+        }
+
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            startDownload(saveBtn.dataset.file);
+            post('/history/' + saveBtn.dataset.batch + '/saved')
+                .then(function() { dropRow(row); })
+                .catch(function() { saveBtn.disabled = false; });
+            return;
+        }
+
+        if (delBtn) {
+            delBtn.disabled = true;
+            post('/history/' + delBtn.dataset.batch + '/delete')
+                .then(function() { dropRow(row); })
+                .catch(function() { delBtn.disabled = false; });
+        }
+    });
+})();
+</script>

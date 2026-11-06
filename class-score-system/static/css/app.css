@@ -868,6 +868,13 @@ dialog.modal:focus,
 dialog.modal:focus-visible { outline: none; }
 
 /* 待处理批次 */
+.history-row.is-removing {
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity .18s ease, transform .18s ease;
+}
+
+/* 待处理批次 */
 .history-card { margin-top: 18px; }
 
 .history-count {

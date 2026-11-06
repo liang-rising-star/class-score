@@ -216,55 +216,5 @@
 })();
 </script>
 
-<script>
-// 待处理批次里的「打印」：与主按钮同样的静默打印，成功后标记该批次已打印
-(function() {
-    var buttons = document.querySelectorAll('.history-print');
-    if (!buttons.length) return;
-
-    var csrf = document.querySelector('input[name="csrf_token"]').value;
-
-    function bridge() {
-        return (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects)
-            ? window.chrome.webview.hostObjects.desktopBridge : null;
-    }
-
-    function markPrinted(batchId) {
-        var body = new URLSearchParams({ csrf_token: csrf });
-        return fetch('/history/' + batchId + '/printed', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
-        });
-    }
-
-    [].forEach.call(buttons, function(btn) {
-        btn.addEventListener('click', function() {
-            var b = bridge();
-            var row = btn.closest('.history-row');
-            var form = row.querySelector('.history-print-form');
-
-            if (!b) { form.submit(); return; }
-
-            btn.disabled = true;
-            btn.textContent = '打印中…';
-            var url = location.origin + '/print-sheet?id=' + encodeURIComponent(btn.dataset.batch);
-            b.PrintUrl(url, btn.dataset.printer || '').then(function(r) {
-                if (r && r.indexOf('queued') === 0) {
-                    setTimeout(function() { markPrinted(btn.dataset.batch).then(function() { location.reload(); }); }, 2500);
-                } else {
-                    btn.disabled = false;
-                    btn.textContent = '打印';
-                    alert('打印失败：' + r);
-                }
-            }).catch(function(err) {
-                btn.disabled = false;
-                btn.textContent = '打印';
-                alert('打印失败：' + err);
-            });
-        });
-    });
-})();
-</script>
 </body>
 </html>
