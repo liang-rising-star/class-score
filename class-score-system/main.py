@@ -482,7 +482,7 @@ def _set_default_printer(name):
         return False
 
 
-def print_document(filepath, printer=""):
+def send_to_printer(filepath, printer=""):
     """打印 docx；printer 为空则用系统默认打印机。返回实际使用的打印机名。"""
     if os.name != "nt":
         raise OSError("仅支持 Windows 打印")
@@ -1616,7 +1616,7 @@ async def print_document(request: Request, filename: str = Form(...),
 
     printer = (read_config().get("print", {}) or {}).get("printer", "") or ""
     try:
-        used = print_document(filepath, printer)
+        used = send_to_printer(filepath, printer)
         sess["gen_notice"] = {"kind": "success", "text": f"已发送到打印机：{used}"}
     except Exception as exc:
         sess["gen_notice"] = {"kind": "error", "text": f"无法调用打印机：{exc}"}
