@@ -196,10 +196,16 @@
             printBtn.textContent = '打印中…';
             pendingPrint = { batchId: printBtn.dataset.batch, row: row };
 
-            if (window.PrintProgress) window.PrintProgress.open('准备该批次的打印页面…');
+            if (window.PrintProgress) window.PrintProgress.open('正在生成该批次的 PDF…');
 
-            var url = location.origin + '/print-sheet?id=' + encodeURIComponent(printBtn.dataset.batch);
-            b.PrintUrl(url, printBtn.dataset.printer || '', printBtn.dataset.batch).then(function(r) {
+            var resolve = window.resolvePrintUrl || function(id) {
+                return Promise.resolve('/print-sheet?id=' + encodeURIComponent(id));
+            };
+            resolve(printBtn.dataset.batch)
+                .then(function(target) {
+                    return b.PrintUrl(location.origin + target, printBtn.dataset.printer || '', printBtn.dataset.batch);
+                })
+                .then(function(r) {
                 if (!r || r.indexOf('queued') !== 0) {
                     pendingPrint = null;
                     resetPrint(printBtn);

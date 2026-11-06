@@ -609,6 +609,45 @@ def send_to_printer(filepath, printer=""):
     return target
 
 
+def docx_to_pdf(docx_path, pdf_path=None, timeout=90):
+    """用本机 Office/WPS 把 docx 转成 PDF（无窗口）。成功返回 pdf 路径，否则 None。"""
+    if os.name != "nt" or not os.path.isfile(docx_path):
+        return None
+
+    pdf_path = pdf_path or (os.path.splitext(docx_path)[0] + ".pdf")
+    if os.path.exists(pdf_path) and os.path.getmtime(pdf_path) >= os.path.getmtime(docx_path):
+        return pdf_path
+
+    script = f'''
+$ErrorActionPreference = "Continue"
+try {{
+    $w = New-Object -ComObject Word.Application
+    $w.Visible = $false
+    $w.DisplayAlerts = 0
+    try {{
+        $d = $w.Documents.Open("{docx_path}", $false, $true)
+        $d.SaveAs2("{pdf_path}", 17)
+        $d.Close($false)
+    }} finally {{
+        try {{ $w.Quit() }} catch {{}}
+    }}
+}} catch {{ }}
+'''
+    try:
+        import subprocess
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, timeout=timeout,
+            creationflags=0x08000000 if os.name == "nt" else 0,
+        )
+    except Exception:
+        return None
+
+    if os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 0:
+        return pdf_path
+    return None
+
+
 def pick_folder(title="选择文件夹"):
     """弹出系统文件夹选择框。
 
@@ -1751,6 +1790,39 @@ async def history_delete(request: Request, batch_id: str, csrf_token: str = Form
     sess["gen_notice"] = {"kind": "success", "text": "已删除该批次及其导出文件"}
     target = "/generate_result" if sess.get("gen") else "/generate"
     return RedirectResponse(url=target, status_code=303)
+
+
+# 打印用 PDF：按需把导出目录里的 docx 转成 PDF（同目录同名）
+@app.api_route("/print-pdf", methods=["GET", "HEAD"])
+def print_pdf(request: Request, id: str = None):
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    filename = None
+    if id:
+        batch = history_find(id)
+        if batch:
+            filename = batch.get("filename")
+    if not filename:
+        current = sess.get("gen") or {}
+        filename = current.get("filename")
+    if not filename:
+        raise HTTPException(status_code=404, detail="没有可打印的批次")
+
+    name = os.path.basename(filename.replace("\\", "/"))
+    docx_path = os.path.join(get_output_dir(), name)
+    if not os.path.isfile(docx_path):
+        raise HTTPException(status_code=404, detail="导出文件不存在")
+
+    pdf_path = docx_to_pdf(docx_path)
+    if not pdf_path:
+        raise HTTPException(status_code=500, detail="PDF 生成失败")
+
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type="application/pdf")
+
+    return FileResponse(pdf_path, filename=os.path.basename(pdf_path), media_type="application/pdf")
 
 
 # 打印页：把卡片渲染成 A4 网格，由桌面版静默打印（不经过 WPS/Word）

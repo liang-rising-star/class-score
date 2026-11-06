@@ -19,6 +19,9 @@ internal static class Program
     /// <summary>主窗口的 WebView2 环境，隐藏打印窗体复用它（共享 cookie 与浏览器进程）。</summary>
     internal static CoreWebView2Environment? BrowserEnvironment;
 
+    /// <summary>启动时解析出的项目根目录。</summary>
+    internal static string? RootPath;
+
     /// <summary>主窗口的 WebView2，打印进度通过它 postMessage 给页面。</summary>
     internal static WebView2? MainView;
 
@@ -110,6 +113,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             .ToArray();
         _launchArgs = string.Join(" ", all.Select(Quote));
 
+        Program.RootPath = root;
         ApplyAutostart(root);
 
         // 记录 UI 线程上下文：托盘线程/监听线程靠它切回主线程
@@ -701,6 +705,42 @@ public class DesktopBridge
 
     public DesktopBridge(Form owner) => _owner = owner;
 
+    /// <summary>用系统关联程序把最近生成的 PDF 送去打印（WebView2 打印失败时的兜底）。</summary>
+    private static bool TrySystemPrintPdf(string printerName)
+    {
+        try
+        {
+            var root = Program.RootPath;
+            if (string.IsNullOrEmpty(root)) return false;
+
+            var outputDir = Path.Combine(root, "class-score-system", "data", "output");
+            if (!Directory.Exists(outputDir)) return false;
+
+            var latest = new DirectoryInfo(outputDir)
+                .GetFiles("*.pdf")
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .FirstOrDefault();
+            if (latest is null) return false;
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = latest.FullName,
+                UseShellExecute = true,
+                Verb = string.IsNullOrWhiteSpace(printerName) ? "print" : "printto",
+                Arguments = string.IsNullOrWhiteSpace(printerName) ? "" : $"\"{printerName}\"",
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+            Process.Start(psi);
+            AppLog.Write("print: 回退系统打印 PDF " + latest.Name);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("print: 系统打印 PDF 失败 " + ex.Message);
+            return false;
+        }
+    }
+
     /// <summary>把打印进度推给页面（值 0-100）。</summary>
     private static void Report(int value, string text, string token, bool done = false, bool error = false)
     {
@@ -800,6 +840,18 @@ public class DesktopBridge
             AppLog.Write($"print: {result} -> {target}");
 
             var ok = result == CoreWebView2PrintStatus.Succeeded;
+
+            // WebView2 打印 PDF 偶尔会失败，此时退回系统关联程序直接打印该文件
+            if (!ok && url.Contains("/print-pdf"))
+            {
+                var saved = TrySystemPrintPdf(printerName);
+                if (saved)
+                {
+                    Report(100, $"已交给系统打印 PDF → {target}", token, done: true, error: false);
+                    return;
+                }
+            }
+
             Report(100, ok ? $"已发送到 {target}" : $"打印失败：{result}", token, done: true, error: !ok);
         }
         catch (Exception ex)

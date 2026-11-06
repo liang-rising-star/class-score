@@ -166,6 +166,14 @@
 
     closeBtn.addEventListener('click', close);
 
+    // 优先用导出的 PDF（和 Word 完全一致），生成失败时回退到 HTML 打印页
+    window.resolvePrintUrl = function(batchId) {
+        var q = batchId ? ('?id=' + encodeURIComponent(batchId)) : '';
+        return fetch('/print-pdf' + q, { method: 'HEAD' })
+            .then(function(r) { return r.ok ? ('/print-pdf' + q) : ('/print-sheet' + q); })
+            .catch(function() { return '/print-sheet' + q; });
+    };
+
     window.PrintProgress = {
         open: open,
         update: setProgress,
@@ -242,8 +250,12 @@
         var btnEl = btn;
         btnEl.disabled = true;
         window.PrintProgress.onDone('main', function() { btnEl.disabled = false; });
+        window.PrintProgress.update(12, '正在生成 PDF…');
 
-        b.PrintUrl(location.origin + '/print-sheet', btnEl.dataset.printer || '', 'main')
+        window.resolvePrintUrl('')
+            .then(function(target) {
+                return b.PrintUrl(location.origin + target, btnEl.dataset.printer || '', 'main');
+            })
             .then(function(r) {
                 if (r && r.indexOf('queued') !== 0) {
                     btnEl.disabled = false;
