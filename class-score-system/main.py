@@ -1368,6 +1368,30 @@ async def init_admin(request: Request):
     return RedirectResponse(url="/login")
 
 # 从 2.x 旧版本导入数据库（仅首次初始化时可用）
+SOUND_OK_KEYS = {"bell", "blip", "chime", "coin", "bubble", "xylophone", "drop",
+                 "tick", "chord", "sweepup", "typewriter", "doublebell", "custom"}
+SOUND_FAIL_KEYS = {"soft", "buzz", "double", "descend", "triple", "woodblock",
+                   "thud", "alarm", "custom"}
+
+
+@app.post("/sound/settings")
+async def sound_settings(request: Request, ok_sound: str = Form("chime"),
+                         fail_sound: str = Form("triple"), csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    config = read_config()
+    config.setdefault("sound", {})
+    config["sound"]["ok"] = ok_sound if ok_sound in SOUND_OK_KEYS else "chime"
+    config["sound"]["fail"] = fail_sound if fail_sound in SOUND_FAIL_KEYS else "triple"
+    write_config(config)
+
+    sess["notice"] = {"kind": "success", "text": "核销提示音已保存，回到核销页扫一张就能听到"}
+    return RedirectResponse(url="/setting#sound-card", status_code=303)
+
+
 @app.post("/import_legacy")
 def import_legacy(request: Request, legacy_path: str = Form(None),
                   csrf_token: str = Form(None)):
@@ -1644,8 +1668,11 @@ async def verify(request: Request):
         return RedirectResponse(url="/login")
     config = read_config()
     system_name = config["system"]["name"]
-    return render(request, "verify.html", {"system_name": system_name, "results": None,
-                                           "total_amount": 0, "error": None})
+    sound = config.get("sound", {}) or {}
+    return render(request, "verify.html", {
+        "system_name": system_name, "results": None, "total_amount": 0, "error": None,
+        "sound_ok": sound.get("ok", "chime"), "sound_fail": sound.get("fail", "triple"),
+    })
 
 # 提交核销
 @app.post("/verify")
@@ -1721,6 +1748,49 @@ async def submit_verify(request: Request, codes: str = Form(None), csrf_token: s
     }
     return RedirectResponse(url="/verify_result", status_code=303)
 
+# 单个核销：扫码枪回车即提交，返回 JSON 供页面逐条追加
+@app.post("/verify/one")
+def verify_one(request: Request, code: str = Form(""), csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        raise HTTPException(status_code=403, detail="请先登录")
+
+    raw = (code or "").strip().upper()
+    if not raw:
+        return {"ok": False, "code": "", "message": "没有读到编号"}
+
+    init_db()
+    conn = connect_db()
+    try:
+        score = conn.execute(
+            "SELECT * FROM scores WHERE code = ? OR hash = ?", (raw, raw)
+        ).fetchone()
+        if not score:
+            return {"ok": False, "code": raw, "amount": 0,
+                    "message": "伪造编码", "time": ""}
+
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur = conn.execute(
+            "UPDATE scores SET status = '已作废', verified_at = ?"
+            " WHERE code = ? AND status = '未使用'",
+            (now, score["code"])
+        )
+        conn.commit()
+
+        if cur.rowcount == 1:
+            return {"ok": True, "code": score["code"], "amount": score["amount"],
+                    "class_name": score["class_name"], "title": score["title"],
+                    "message": "核销成功", "time": now}
+
+        redeemed = score["verified_at"]
+        return {"ok": False, "code": score["code"], "amount": score["amount"],
+                "class_name": score["class_name"], "title": score["title"],
+                "message": "已核销编码", "time": redeemed or "未记录"}
+    finally:
+        conn.close()
+
+
 # 核销结果页（防止刷新重复提交）
 @app.get("/verify_result", response_class=HTMLResponse)
 async def verify_result(request: Request):
@@ -1732,8 +1802,11 @@ async def verify_result(request: Request):
         return RedirectResponse(url="/verify")
     results = result["results"]
     ok_count = sum(1 for r in results if r.get("status") == "成功")
+    sound = (read_config().get("sound", {}) or {})
     return render(request, "verify.html", {
         "system_name": result["system_name"],
+        "sound_ok": sound.get("ok", "chime"),
+        "sound_fail": sound.get("fail", "triple"),
         "results": results,
         "ok_count": ok_count,
         "fail_count": len(results) - ok_count,
@@ -1771,6 +1844,8 @@ async def setting(request: Request):
         "backup_count": len(list_backups()),
         "last_backup": last_backup_time(),
         "backup_dir": get_backup_dir(),
+        "sound_ok": (config.get("sound", {}) or {}).get("ok", "chime"),
+        "sound_fail": (config.get("sound", {}) or {}).get("fail", "triple"),
         "backup_time": backup_time,
         "backup_enabled": bool(backup_cfg.get("enabled", True)),
         "next_backup": next_backup_time(),

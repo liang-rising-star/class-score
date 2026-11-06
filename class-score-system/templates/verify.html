@@ -6,6 +6,8 @@
     <link rel="icon" href="/logo.ico" type="image/x-icon">
     <title>核销积分</title>
     <link rel="stylesheet" href="/static/css/app.css?v={{ css_version }}">
+    <script>window.SOUND_SETTINGS = { ok: "{{ sound_ok }}", fail: "{{ sound_fail }}" };</script>
+    <script src="/static/js/sound.js?v={{ css_version }}" defer></script>
 </head>
 <body>
     <div class="app-shell">
@@ -15,14 +17,60 @@
     <main class="page">
         <div class="page-head">
             <h1 class="page-title">核销积分</h1>
-            <p class="page-desc">用扫码枪扫入或用键盘录入编码，一次可提交多张</p>
+            <p class="page-desc">扫一张核销一张，或用批量模式一次提交多张</p>
         </div>
 
         <div class="card">
+            <div class="mode-tabs" role="tablist">
+                <button type="button" class="mode-tab is-active" data-mode="single" role="tab">单个核销</button>
+                <button type="button" class="mode-tab" data-mode="batch" role="tab">批量核销</button>
+            </div>
+
             {% if error %}
             <div class="alert alert-error">{{ error }}</div>
             {% endif %}
 
+            <!-- ============ 单个核销 ============ -->
+            <section class="mode-panel" id="panel-single">
+                <div class="scan-box">
+                    <input type="text" id="scanInput" autocomplete="off" spellcheck="false"
+                           placeholder="扫码枪扫一下，或手动输入编号后回车">
+                    <span class="scan-hint" id="scanHint">等待扫描…</span>
+                </div>
+
+                <div class="result-sheet" id="scanSheet" hidden>
+                    <div class="result-sheet__head">
+                        <span class="result-sheet__title">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M9 11l3 3 8-8"></path>
+                                <path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"></path>
+                            </svg>
+                            核销结果
+                        </span>
+                        <div class="result-sheet__tools">
+                            <div class="summary">
+                                <span class="summary-chip summary-chip--ok">成功 <b id="scanOk">0</b></span>
+                                <span class="summary-chip summary-chip--bad" id="scanBadChip" hidden>未通过 <b id="scanBad">0</b></span>
+                                <span class="summary-chip" id="scanCountChip">共 <b id="scanTotal">0</b> 条</span>
+                            </div>
+                            <a class="sheet-link" href="/setting#sound-card" title="到设置里更换提示音">音效设置</a>
+                            <button type="button" class="sheet-link sheet-link--danger" id="clearScans"
+                                    title="清空本次核销记录">清空记录</button>
+                        </div>
+                    </div>
+
+                    <div class="result-rows" id="scanList"></div>
+
+                    <div class="result-foot">
+                        <span class="result-foot__label">本次核销总面额</span>
+                        <span class="result-foot__value"><b id="scanAmount">0</b><span class="result-foot__unit">分</span></span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============ 批量核销 ============ -->
+            <section class="mode-panel" id="panel-batch" hidden>
             <form action="/verify" method="post">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="field">
@@ -91,6 +139,7 @@
                 </div>
             </div>
             {% endif %}
+            </section>
         </div>
     </main>
 
@@ -111,5 +160,148 @@
         });
     })();
     </script>
+
+<script>
+// ============ 模式切换 ============
+(function() {
+    var tabs = document.querySelectorAll('.mode-tab');
+    var panels = { single: document.getElementById('panel-single'), batch: document.getElementById('panel-batch') };
+    if (!tabs.length) return;
+
+    function activate(mode) {
+        [].forEach.call(tabs, function(t) { t.classList.toggle('is-active', t.dataset.mode === mode); });
+        Object.keys(panels).forEach(function(k) { if (panels[k]) panels[k].hidden = (k !== mode); });
+        if (mode === 'single') {
+            var input = document.getElementById('scanInput');
+            if (input) input.focus();
+        }
+    }
+
+    [].forEach.call(tabs, function(tab) {
+        tab.addEventListener('click', function() { activate(tab.dataset.mode); });
+    });
+
+    // 批量结果渲染出来后，自动回到批量模式
+    var hasBatchResult = document.querySelector('#panel-batch .result-sheet');
+    activate(hasBatchResult ? 'batch' : 'single');
+})();
+
+// ============ 单个核销：扫码即核销 ============
+(function() {
+    var input = document.getElementById('scanInput');
+    if (!input) return;
+
+    var list = document.getElementById('scanList');
+    var sheet = document.getElementById('scanSheet');
+    var okEl = document.getElementById('scanOk');
+    var badEl = document.getElementById('scanBad');
+    var badChip = document.getElementById('scanBadChip');
+    var totalEl = document.getElementById('scanTotal');
+    var amountEl = document.getElementById('scanAmount');
+    var hint = document.getElementById('scanHint');
+    var csrf = document.querySelector('input[name="csrf_token"]');
+
+    var okCount = 0, badCount = 0, totalAmount = 0, index = 0, busy = false;
+
+    function beep(kind) { if (window.SoundKit) window.SoundKit.play(kind); }
+
+    function fmt(n) { return n < 10 ? '0' + n : String(n); }
+
+    function appendRow(data) {
+        index += 1;
+        var row = document.createElement('div');
+        row.className = 'result-row ' + (data.ok ? 'is-ok' : 'is-bad');
+        row.innerHTML =
+            '<span class="result-no">' + fmt(index) + '</span>' +
+            '<span class="result-code">' + (data.code || '—') + '</span>' +
+            '<span class="result-amount">' + (data.amount ? data.amount + ' 分' : '') + '</span>' +
+            '<span class="result-fill" aria-hidden="true"></span>' +
+            '<span class="result-time">' + (data.time || '') + '</span>' +
+            '<span class="status-pill ' + (data.ok ? 'status-pill--ok' : 'status-pill--bad') + '">' +
+            (data.message || '') + '</span>';
+        // 最新的排在最前面，旧的往下推
+        list.insertBefore(row, list.firstChild);
+        list.scrollTop = 0;
+    }
+
+    function refresh() {
+        sheet.hidden = index === 0;
+        okEl.textContent = okCount;
+        badEl.textContent = badCount;
+        badChip.hidden = badCount === 0;
+        totalEl.textContent = index;
+        amountEl.textContent = totalAmount;
+    }
+
+    // 扫码状态提示：默认灰、成功绿、失败红
+    function setHint(text, state) {
+        hint.textContent = text;
+        hint.className = 'scan-hint' + (state ? ' is-' + state : '');
+    }
+
+    function submitCode() {
+        var code = input.value.trim();
+        if (!code || busy) return;
+
+        busy = true;
+        input.value = '';
+        setHint('核销中…', '');
+
+        var body = new URLSearchParams({ code: code, csrf_token: csrf ? csrf.value : '' });
+        fetch('/verify/one', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) { okCount += 1; totalAmount += data.amount || 0; }
+            else { badCount += 1; }
+            appendRow(data);
+            refresh();
+            beep(data.ok ? 'ok' : 'bad');
+            setHint(data.ok ? '核销成功' : (data.message || '未通过'), data.ok ? 'ok' : 'bad');
+        })
+        .catch(function() {
+            badCount += 1;
+            appendRow({ ok: false, code: code, message: '网络异常', time: '' });
+            refresh();
+            beep('bad');
+            setHint('网络异常', 'bad');
+        })
+        .finally(function() {
+            busy = false;
+            input.focus();
+        });
+    }
+
+    // 扫码枪会以 Enter 结尾：拦掉默认行为，直接核销
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            submitCode();
+        }
+    });
+
+    // 清空本次核销记录
+    var clearBtn = document.getElementById('clearScans');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+            if (list.children.length && !confirm('清空本次核销记录？（已核销的卡不会恢复）')) return;
+            list.innerHTML = '';
+            index = 0; okCount = 0; badCount = 0; totalAmount = 0;
+            refresh();
+            setHint('等待扫描…', '');
+            input.focus();
+        });
+    }
+
+    input.focus();
+    // 点到这些控件时不要抢焦点，否则下拉框会立刻收起
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('button, a, textarea, input, select, label')) input.focus();
+    });
+})();
+</script>
 </body>
 </html>

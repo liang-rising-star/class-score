@@ -152,6 +152,224 @@ img,
     border-bottom-style: solid;
 }
 
+/* 核销页：模式切换 / 扫码单核 */
+.mode-tabs {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 18px;
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+}
+
+.mode-tab {
+    padding: 7px 18px;
+    font-family: inherit;
+    font-size: 13.5px;
+    color: var(--text-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all .16s;
+}
+
+.mode-tab:hover { color: var(--text-strong); }
+
+.mode-tab.is-active {
+    background: #fff;
+    color: var(--primary-dark);
+    font-weight: 650;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .12);
+}
+
+.scan-box {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: #fff;
+    transition: border-color .16s, box-shadow .16s;
+}
+
+/* 聚焦只加深边框，不加发光圈 */
+.scan-box:focus-within {
+    border-color: var(--primary);
+    box-shadow: none;
+}
+
+/* 用更高优先级压掉全局输入框样式，避免出现内外两层边框 */
+.scan-box input[type="text"],
+.scan-box input[type="text"]:focus {
+    flex: 1;
+    min-width: 0;
+    height: 40px;
+    padding: 0;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    color: var(--text-strong);
+    border: 0;
+    border-radius: 0;
+    outline: none;
+    background: transparent;
+    box-shadow: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.scan-box input::placeholder {
+    font-size: 15px;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: #a8b3c4;
+}
+
+/* 扫码状态提示：带底色的胶囊 */
+.scan-hint {
+    flex: 0 0 auto;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    transition: background .16s, color .16s, border-color .16s;
+    white-space: nowrap;
+}
+
+.scan-hint.is-ok {
+    color: #15803d;
+    background: #dcfce7;
+    border-color: #86efac;
+}
+
+.scan-hint.is-bad {
+    color: #b91c1c;
+    background: #fee2e2;
+    border-color: #fca5a5;
+}
+
+/* 音效选择（核销页已移到设置页） */
+.sound-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin-top: 12px;
+}
+
+.sound-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
+.sound-pick select {
+    height: 32px;
+    padding: 0 28px 0 10px;
+    font-size: 12.5px;
+    border-radius: 8px;
+    background-position: right 8px center;
+    background-size: 12px;
+    width: auto;
+    min-width: 128px;
+}
+
+.sound-play {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border: 1px solid transparent;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all .14s;
+}
+
+.sound-play:hover {
+    background: var(--primary);
+    color: #fff;
+}
+
+/* 扫码结果面板：沿用批量核销的 result-sheet，仅限制高度 */
+#scanList {
+    max-height: 420px;
+    overflow-y: auto;
+}
+
+#scanSheet {
+    margin-top: 16px;
+}
+
+/* 设置页：核销提示音 */
+.sound-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sound-inline select {
+    flex: 1;
+    min-width: 0;
+}
+
+.sound-play {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border: 1px solid transparent;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all .14s;
+}
+
+.sound-play:hover {
+    background: var(--primary);
+    color: #fff;
+}
+
+/* 核销结果面板右上角的小按钮 */
+.sheet-link {
+    padding: 5px 12px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    text-decoration: none;
+    background: #fff;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all .14s;
+    white-space: nowrap;
+    font-family: inherit;
+}
+
+.sheet-link:hover {
+    color: var(--primary-dark);
+    border-color: var(--primary);
+    background: var(--primary-soft);
+}
+
+.sheet-link--danger:hover {
+    color: #b91c1c;
+    border-color: #fca5a5;
+    background: #fef2f2;
+}
+
 /* 隐藏浏览器右侧滚动条（滚轮/触控板照常滚动） */
 html {
     scrollbar-width: none;          /* Firefox */
