@@ -633,6 +633,7 @@ internal sealed class MainForm : Form
     {
         base.OnShown(e);
         ApplyWindowSize();   // 布局完成后再定位，CenterToScreen 才不会用旧尺寸
+        WindowEffects.Apply(Handle);   // Win11 圆角 + Mica 毛玻璃标题栏
     }
 
     /// <summary>重启后导航到（可能是新的）地址；地址没变就刷新。</summary>
@@ -694,6 +695,114 @@ internal sealed class MainForm : Form
     }
 
     public void Reload() => _web.CoreWebView2?.Reload();
+}
+
+/// <summary>Win11 窗口效果：圆角 + Mica 毛玻璃标题栏。</summary>
+public static class WindowEffects
+{
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+    private const int DWMWA_BORDER_COLOR = 34;
+    private const int DWMWA_CAPTION_COLOR = 35;
+    private const int DWMWA_TEXT_COLOR = 36;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ACCENT_POLICY
+    {
+        public int AccentState;
+        public int AccentFlags;
+        public int GradientColor;
+        public int AnimationId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WINDOWCOMPOSITIONATTRIBDATA
+    {
+        public int Attribute;
+        public IntPtr Data;
+        public int SizeOfData;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WINDOWCOMPOSITIONATTRIBDATA data);
+
+    /// <summary>Win11 亚克力：让窗口（含标题栏）呈现半透明模糊。</summary>
+    private static void TryAcrylic(IntPtr handle)
+    {
+        try
+        {
+            var accent = new ACCENT_POLICY
+            {
+                AccentState = 4,                 // ACCENT_ENABLE_ACRYLICBLURBEHIND
+                AccentFlags = 2,
+                GradientColor = unchecked((int)0xB3F7F9FC)   // AABBGGRR：浅色磨砂（越靠前的两位越透）
+            };
+
+            var data = new WINDOWCOMPOSITIONATTRIBDATA
+            {
+                Attribute = 19,                  // WCA_ACCENT_POLICY
+                SizeOfData = Marshal.SizeOf(typeof(ACCENT_POLICY)),
+                Data = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(ACCENT_POLICY)))
+            };
+
+            try
+            {
+                Marshal.StructureToPtr(accent, data.Data, false);
+                SetWindowCompositionAttribute(handle, ref data);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(data.Data);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("acrylic failed: " + ex.Message);
+        }
+    }
+
+    public static void Apply(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero) return;
+
+        try
+        {
+            var corner = 2;                 // DWMWCP_ROUND
+            DwmSetWindowAttribute(handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
+
+            var backdrop = 2;               // DWMSBT_MAINWINDOW → Mica
+            var result = DwmSetWindowAttribute(handle, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
+            if (result != 0)
+            {
+                // 老一些的 Win11 用未公开属性 1029 也有同样效果
+                backdrop = 1;
+                DwmSetWindowAttribute(handle, 1029, ref backdrop, sizeof(int));
+            }
+
+            var dark = 0;                   // 浅色标题栏，跟应用整体一致
+            DwmSetWindowAttribute(handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+
+            // 让标题栏不要用纯色填充，交给亚克力渲染（DWMWA_COLOR_NONE = 0xFFFFFFFE）
+            var caption = unchecked((int)0xFFFFFFFE);
+            DwmSetWindowAttribute(handle, DWMWA_CAPTION_COLOR, ref caption, sizeof(int));
+
+            var captionText = (int)(0x2A | (0x17 << 8) | (0x0F << 16)); // #0F172A
+            DwmSetWindowAttribute(handle, DWMWA_TEXT_COLOR, ref captionText, sizeof(int));
+
+            var border = (int)(0xEE | (0xE9 << 8) | (0xE2 << 16));      // #E2E9EE
+            DwmSetWindowAttribute(handle, DWMWA_BORDER_COLOR, ref border, sizeof(int));
+
+            TryAcrylic(handle);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("window effects failed: " + ex.Message);
+        }
+    }
 }
 
 /// <summary>暴露给网页脚本的桥：目前只提供原生文件夹选择。</summary>
