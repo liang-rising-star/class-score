@@ -182,33 +182,41 @@
         if (!row) return;
 
         if (printBtn) {
-            printBtn.disabled = true;
-            printBtn.textContent = '打印中…';
-            if (window.PrintProgress) window.PrintProgress.open('准备打印任务…');
+            if (!window.PrintProgress) return;
 
-            var csrfField = document.querySelector('input[name="csrf_token"]');
-            var body = new URLSearchParams({ csrf_token: csrfField ? csrfField.value : '' });
-            body.append('batch_id', printBtn.dataset.batch);
+            window.PrintProgress.ask('打印这批积分卡？',
+                row.querySelector('.history-meta').textContent.trim() + '，点「打印」开始，点「取消」返回。')
+                .then(function(confirmed) {
+                    if (!confirmed) return;
 
-            fetch('/print-now', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: body.toString()
-            })
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-                if (d && d.ok) {
-                    if (window.PrintProgress) window.PrintProgress.finish(true, d.message || '已发送到打印机');
-                    dropRow(row);
-                } else {
-                    resetPrint(printBtn);
-                    if (window.PrintProgress) window.PrintProgress.finish(false, (d && d.message) || '打印失败');
-                }
-            })
-            .catch(function(err) {
-                resetPrint(printBtn);
-                if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + err);
-            });
+                    printBtn.disabled = true;
+                    printBtn.textContent = '打印中…';
+                    window.PrintProgress.begin('准备打印任务…');
+
+                    var csrfField = document.querySelector('input[name="csrf_token"]');
+                    var body = new URLSearchParams({ csrf_token: csrfField ? csrfField.value : '' });
+                    body.append('batch_id', printBtn.dataset.batch);
+
+                    fetch('/print-now', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: body.toString()
+                    })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        if (d && d.ok) {
+                            window.PrintProgress.finish(true, d.message || '已发送到打印机');
+                            dropRow(row);
+                        } else {
+                            resetPrint(printBtn);
+                            window.PrintProgress.finish(false, (d && d.message) || '打印失败');
+                        }
+                    })
+                    .catch(function(err) {
+                        resetPrint(printBtn);
+                        window.PrintProgress.finish(false, '打印失败：' + err);
+                    });
+                });
             return;
         }
 

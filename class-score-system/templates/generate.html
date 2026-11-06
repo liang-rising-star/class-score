@@ -103,32 +103,39 @@
                     <path d="M7 17h10v4H7z"></path>
                 </svg>
             </div>
-            <h3 class="modal__title" id="printTitle">正在打印</h3>
-            <p class="modal__text" id="printText">准备打印页面…</p>
+            <h3 class="modal__title" id="printTitle">打印积分卡？</h3>
+            <p class="modal__text" id="printText">将把这批积分卡发送到打印机，继续？</p>
 
-            <div class="progress" id="printProgress">
+            <div class="progress" id="printProgress" hidden>
                 <div class="progress__fill" id="printFill"></div>
             </div>
-            <div class="progress__meta"><span id="printPercent">0%</span></div>
+            <div class="progress__meta" id="printPercentBox" hidden><span id="printPercent">0%</span></div>
 
             <div class="modal__actions">
-                <button type="button" class="btn btn-ghost" id="printClose" disabled>请稍候…</button>
+                <button type="button" class="btn btn-ghost" id="printCancel">取消</button>
+                <button type="button" class="btn" id="printStart">打印</button>
+                <button type="button" class="btn btn-ghost" id="printClose" hidden>关闭</button>
             </div>
         </div>
     </dialog>
 
 <script>
-// 打印进度弹窗：统一在这里管理，主按钮和历史条目共用
+// 打印弹窗：先确认（取消/打印），确认后显示进度，结束显示关闭
 (function() {
     var dlg = document.getElementById('printDialog');
     var fill = document.getElementById('printFill');
     var percent = document.getElementById('printPercent');
+    var percentBox = document.getElementById('printPercentBox');
+    var progress = document.getElementById('printProgress');
     var text = document.getElementById('printText');
     var title = document.getElementById('printTitle');
+    var cancelBtn = document.getElementById('printCancel');
+    var startBtn = document.getElementById('printStart');
     var closeBtn = document.getElementById('printClose');
     if (!dlg) return;
 
-    var callbacks = {};       // token -> 完成回调
+    var callbacks = {};
+    var resolver = null;
 
     function setProgress(value, label) {
         value = Math.max(0, Math.min(100, Math.round(value)));
@@ -138,19 +145,39 @@
         if (label) text.textContent = label;
     }
 
-    function open(subtitle) {
+    function showConfirm(t, message) {
+        title.textContent = t || '打印积分卡？';
+        text.textContent = message || '将把这批积分卡发送到打印机，继续？';
         dlg.classList.remove('is-error');
-        title.textContent = '正在打印';
-        closeBtn.disabled = true;
-        closeBtn.textContent = '请稍候…';
-        setProgress(4, subtitle || '准备打印页面…');
+        progress.hidden = true;
+        percentBox.hidden = true;
+        cancelBtn.hidden = false;
+        startBtn.hidden = false;
+        closeBtn.hidden = true;
         if (!dlg.open) dlg.showModal();
+
+        return new Promise(function(resolve) {
+            resolver = resolve;
+        });
+    }
+
+    function beginProgress(label) {
+        progress.hidden = false;
+        percentBox.hidden = false;
+        cancelBtn.hidden = true;
+        startBtn.hidden = true;
+        closeBtn.hidden = true;
+        title.textContent = '正在打印';
+        setProgress(8, label || '准备打印任务…');
     }
 
     function finish(ok, label) {
         setProgress(ok ? 100 : Number(fill.dataset.value || 0), label);
         title.textContent = ok ? '打印任务已发送' : '打印失败';
         dlg.classList.toggle('is-error', !ok);
+        cancelBtn.hidden = true;
+        startBtn.hidden = true;
+        closeBtn.hidden = false;
         closeBtn.disabled = false;
         closeBtn.textContent = '关闭';
         if (ok) setTimeout(close, 900);
@@ -160,10 +187,20 @@
         if (dlg.open) dlg.close();
     }
 
+    cancelBtn.addEventListener('click', function() {
+        close();
+        if (resolver) { var r = resolver; resolver = null; r(false); }
+    });
+
+    startBtn.addEventListener('click', function() {
+        if (resolver) { var r = resolver; resolver = null; r(true); }
+    });
+
     closeBtn.addEventListener('click', close);
 
     window.PrintProgress = {
-        open: open,
+        ask: showConfirm,
+        begin: beginProgress,
         update: setProgress,
         finish: finish,
         close: close,
@@ -186,17 +223,11 @@
     }
 })();
 
-// 生成结果面板的「直接打印」
+// 生成结果面板的「直接打印」：先确认，再执行
 (function() {
     var btn = document.getElementById('printBtn');
     if (!btn) return;
 
-    var bridge = function() {
-        return (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects)
-            ? window.chrome.webview.hostObjects.desktopBridge : null;
-    };
-
-    // 当前批次的保存：桌面端写盘完成后标记
     var saveLink = document.querySelector('.success-panel a[href^="/download/"]');
     var currentBatch = "{{ batch_id or '' }}";
     if (saveLink && currentBatch && window.chrome && window.chrome.webview) {
@@ -218,43 +249,48 @@
 
     var ticker = null;
     function startTicker() {
-        var steps = [[12, '准备打印任务…'], [35, '打开导出文档…'], [62, '发送到打印机…'], [85, '等待打印队列接收…']];
+        var steps = [[20, '打开导出文档…'], [45, '生成打印页面…'], [70, '发送到打印机…'], [88, '等待打印队列接收…']];
         var i = 0;
-        if (window.PrintProgress) window.PrintProgress.update(steps[0][0], steps[0][1]);
         ticker = setInterval(function() {
-            if (i < steps.length - 1) {
+            if (i < steps.length) {
+                window.PrintProgress.update(steps[i][0], steps[i][1]);
                 i++;
-                if (window.PrintProgress) window.PrintProgress.update(steps[i][0], steps[i][1]);
             }
         }, 700);
     }
     function stopTicker() { if (ticker) { clearInterval(ticker); ticker = null; } }
 
-    // 直接用 Office/WPS 以 100% 比例打印 docx，不经过 PDF 阅读器（避免额外边距与缩放）
     btn.addEventListener('click', function() {
-        if (window.PrintProgress) window.PrintProgress.open('准备打印任务…');
-        btn.disabled = true;
-        startTicker();
+        if (!window.PrintProgress) return;
 
-        var body = new URLSearchParams({ csrf_token: csrf });
-        if (currentBatch) body.append('batch_id', currentBatch);
+        window.PrintProgress.ask('打印这批积分卡？', '{{ quantity }} 张将发送到打印机，点「打印」开始，点「取消」返回。')
+            .then(function(confirmed) {
+                if (!confirmed) return;
 
-        fetch('/print-now', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-            stopTicker();
-            btn.disabled = false;
-            if (window.PrintProgress) window.PrintProgress.finish(!!d.ok, d.message || (d.ok ? '已发送到打印机' : '打印失败'));
-        })
-        .catch(function(err) {
-            stopTicker();
-            btn.disabled = false;
-            if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + err);
-        });
+                window.PrintProgress.begin('准备打印任务…');
+                btn.disabled = true;
+                startTicker();
+
+                var body = new URLSearchParams({ csrf_token: csrf });
+                if (currentBatch) body.append('batch_id', currentBatch);
+
+                fetch('/print-now', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body.toString()
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    stopTicker();
+                    btn.disabled = false;
+                    window.PrintProgress.finish(!!d.ok, d.message || (d.ok ? '已发送到打印机' : '打印失败'));
+                })
+                .catch(function(err) {
+                    stopTicker();
+                    btn.disabled = false;
+                    window.PrintProgress.finish(false, '打印失败：' + err);
+                });
+            });
     });
 })();
 </script>
