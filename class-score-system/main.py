@@ -13,6 +13,7 @@ import time
 import threading
 import zipfile
 import secrets
+import uuid
 import string
 import barcode
 from docx import Document
@@ -431,6 +432,99 @@ def _enable_dpi_awareness():
         ctypes.windll.user32.SetProcessDPIAware()
     except Exception:
         pass
+
+
+HISTORY_NAME = "history.json"
+HISTORY_LIMIT = 30
+
+
+def history_path():
+    return os.path.join(DATA_DIR, HISTORY_NAME)
+
+
+def load_history():
+    path = history_path()
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def save_history(records):
+    path = history_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(records[:HISTORY_LIMIT], fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def history_add(record):
+    records = load_history()
+    records.insert(0, record)
+    save_history(records)
+    # 超出上限的旧记录连同导出文件一起清掉
+    for extra in records[HISTORY_LIMIT:]:
+        _drop_batch_file(extra)
+    return record
+
+
+def history_find(batch_id):
+    for item in load_history():
+        if item.get("id") == batch_id:
+            return item
+    return None
+
+
+def history_patch(batch_id, **fields):
+    records = load_history()
+    for item in records:
+        if item.get("id") == batch_id:
+            item.update(fields)
+    save_history(records)
+
+
+def history_mark(filename, field):
+    if not filename:
+        return
+    records = load_history()
+    changed = False
+    for item in records:
+        if item.get("filename") == filename:
+            item[field] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            changed = True
+    if changed:
+        save_history(records)
+
+
+def _drop_batch_file(item):
+    path = os.path.join(get_output_dir(), os.path.basename(item.get("filename", "")))
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def history_remove(batch_id):
+    records = load_history()
+    kept = []
+    for item in records:
+        if item.get("id") == batch_id:
+            _drop_batch_file(item)
+        else:
+            kept.append(item)
+    save_history(kept)
+
+
+def history_pending():
+    """还没打印也没保存的批次（新的在前）。"""
+    return [item for item in load_history()
+            if not item.get("printed") and not item.get("saved")]
 
 
 def list_printers():
@@ -1162,7 +1256,12 @@ async def generate(request: Request):
         return RedirectResponse(url="/login")
     config = read_config()
     system_name = config["system"]["name"]
-    return render(request, "generate.html", {"system_name": system_name, "success": False})
+    return render(request, "generate.html", {
+        "system_name": system_name,
+        "success": False,
+        "history": history_pending(),
+        "printer_value": (config.get("print", {}) or {}).get("printer", "") or "",
+    })
 
 # 提交生成积分（结果存会话，避免多人共用时互相串号）
 @app.post("/generate")
@@ -1216,8 +1315,24 @@ async def submit_generate(request: Request, class_name: str = Form(...), title: 
     # 导出Word
     filepath = export_to_word(class_name, title, amount, codes, issue_date)
 
+    batch = {
+        "id": uuid.uuid4().hex[:12],
+        "filename": os.path.basename(filepath),
+        "class_name": class_name,
+        "title": title,
+        "amount": amount,
+        "quantity": quantity,
+        "issue_date": issue_date,
+        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "codes": codes,
+        "printed": False,
+        "saved": False,
+    }
+    history_add(batch)
+
     sess["gen"] = {
         "system_name": system_name,
+        "batch_id": batch["id"],
         "filepath": filepath,
         "filename": os.path.basename(filepath),
         "quantity": quantity,
@@ -1247,6 +1362,8 @@ async def generate_result(request: Request):
         "quantity": result["quantity"],
         "notice": notice,
         "printer_value": (read_config().get("print", {}) or {}).get("printer", "") or "",
+        "history": [h for h in history_pending() if h.get("id") != result.get("batch_id")],
+        "batch_id": result.get("batch_id", ""),
     })
 
 # 核销页面
@@ -1597,14 +1714,47 @@ async def reset_system(request: Request, reset_password: str = Form(...), csrf_t
     return RedirectResponse(url="/", status_code=303)
 
 
+# ---------------- 待处理批次 ----------------
+
+@app.post("/history/{batch_id}/printed")
+def history_mark_printed(request: Request, batch_id: str, csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return Response(status_code=403)
+
+    if history_find(batch_id):
+        history_patch(batch_id, printed=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    return Response(status_code=204)
+
+
+@app.post("/history/{batch_id}/delete")
+async def history_delete(request: Request, batch_id: str, csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    history_remove(batch_id)
+    sess["gen_notice"] = {"kind": "success", "text": "已删除该批次及其导出文件"}
+    target = "/generate_result" if sess.get("gen") else "/generate"
+    return RedirectResponse(url=target, status_code=303)
+
+
 # 打印页：把卡片渲染成 A4 网格，由桌面版静默打印（不经过 WPS/Word）
 @app.get("/print-sheet", response_class=HTMLResponse)
-async def print_sheet(request: Request):
+async def print_sheet(request: Request, id: str = None):
     sid, sess = get_session(request)
     if not sess:
         return RedirectResponse(url="/login")
 
-    result = sess.get("gen")
+    result = None
+    if id:
+        batch = history_find(id)
+        if batch and batch.get("codes"):
+            result = dict(batch, system_name=read_config()["system"]["name"])
+    if result is None:
+        result = sess.get("gen")
     if not result or not result.get("codes"):
         return RedirectResponse(url="/generate")
 
@@ -1665,6 +1815,7 @@ async def print_document(request: Request, filename: str = Form(...),
     printer = (read_config().get("print", {}) or {}).get("printer", "") or ""
     try:
         used = send_to_printer(filepath, printer)
+        history_mark(name, "printed")
         sess["gen_notice"] = {"kind": "success", "text": f"已发送到打印机：{used}"}
     except Exception as exc:
         sess["gen_notice"] = {"kind": "error", "text": f"无法调用打印机：{exc}"}
@@ -1699,6 +1850,8 @@ async def download_file(request: Request, filename: str):
         inside = False
     if not inside or not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="文件不存在")
+
+    history_mark(name, "saved")
 
     return FileResponse(
         filepath,

@@ -1,0 +1,41 @@
+{% if history %}
+<section class="card history-card">
+    <div class="card-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+            <path d="M3 3v6h6"></path>
+            <path d="M12 8v4l3 2"></path>
+        </svg>
+        待处理批次
+        <span class="history-count">{{ history|length }}</span>
+    </div>
+    <p class="card-sub">这些还没有打印或保存，关掉窗口也不会丢，可以随时回来处理</p>
+
+    <ul class="history-list">
+        {% for item in history %}
+        <li class="history-row">
+            <div class="history-main">
+                <div class="history-title">{{ item.class_name }} · {{ item.title }}</div>
+                <div class="history-meta">{{ item.quantity }} 张 · {{ item.amount }} 分 · {{ item.created_at }}</div>
+                <div class="history-file">{{ item.filename }}</div>
+            </div>
+            <div class="history-actions">
+                <button type="button" class="btn btn-sm history-print"
+                        data-batch="{{ item.id }}"
+                        data-printer="{{ printer_value }}">打印</button>
+                <a class="btn btn-ghost btn-sm" href="/download/{{ item.filename }}">保存</a>
+                <form action="/print" method="post" class="history-print-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="filename" value="{{ item.filename }}">
+                </form>
+                <form action="/history/{{ item.id }}/delete" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-ghost btn-sm history-delete">删除</button>
+                </form>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
