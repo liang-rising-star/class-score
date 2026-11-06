@@ -40,6 +40,24 @@
 </section>
 {% endif %}
 
+    <!-- 删除确认弹窗 -->
+    <dialog id="deleteDialog" class="modal" aria-labelledby="deleteTitle">
+        <div class="modal__body">
+            <div class="modal__icon modal__icon--danger">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"></path>
+                </svg>
+            </div>
+            <h3 class="modal__title" id="deleteTitle">删除这个批次？</h3>
+            <p class="modal__text" id="deleteText">同时会删掉它导出的 Word 文件，删除后不可恢复。</p>
+            <div class="modal__actions">
+                <button type="button" class="btn btn-ghost" id="deleteCancel">取消</button>
+                <button type="button" class="btn btn-danger" id="deleteConfirm">删除</button>
+            </div>
+        </div>
+    </dialog>
+
 <script>
 // 待处理批次：只有「真正完成」才从列表移除
 //  - 保存：等桌面端通知下载写完盘（取消保存则保留）
@@ -123,6 +141,44 @@
         });
     }
 
+    // 删除前先确认
+    var dlg = document.getElementById('deleteDialog');
+    var dlgText = document.getElementById('deleteText');
+    var dlgConfirm = document.getElementById('deleteConfirm');
+    var pendingDelete = null;
+
+    function askDelete(batchId, row, btn) {
+        if (!dlg) return;
+        var titleEl = row.querySelector('.history-title');
+        var metaEl = row.querySelector('.history-meta');
+        dlgText.textContent = (titleEl ? titleEl.textContent.trim() + '（'
+            + (metaEl ? metaEl.textContent.trim() : '') + '）' : '')
+            + ' 导出的 Word 文件会一起删除，删除后不可恢复。';
+        pendingDelete = { batchId: batchId, row: row, btn: btn };
+        dlg.showModal();
+    }
+
+    function closeDelete() {
+        if (dlg && dlg.open) dlg.close();
+        if (pendingDelete && pendingDelete.btn) pendingDelete.btn.disabled = false;
+        pendingDelete = null;
+    }
+
+    if (dlg) {
+        document.getElementById('deleteCancel').addEventListener('click', closeDelete);
+        dlg.addEventListener('click', function(e) { if (e.target === dlg) closeDelete(); });
+        dlgConfirm.addEventListener('click', function() {
+            if (!pendingDelete) return;
+            var job = pendingDelete;
+            pendingDelete = null;
+            dlg.close();
+            job.btn.disabled = true;
+            post('/history/' + job.batchId + '/delete')
+                .then(function() { dropRow(job.row); })
+                .catch(function() { job.btn.disabled = false; });
+        });
+    }
+
     card.addEventListener('click', function(e) {
         var printBtn = e.target.closest('.history-print');
         var saveBtn = e.target.closest('.history-save');
@@ -171,10 +227,7 @@
         }
 
         if (delBtn) {
-            delBtn.disabled = true;
-            post('/history/' + delBtn.dataset.batch + '/delete')
-                .then(function() { dropRow(row); })
-                .catch(function() { delBtn.disabled = false; });
+            askDelete(delBtn.dataset.batch, row, delBtn);
         }
     });
 })();

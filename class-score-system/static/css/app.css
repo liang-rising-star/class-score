@@ -868,6 +868,11 @@ dialog.modal:focus,
 dialog.modal:focus-visible { outline: none; }
 
 /* 待处理批次 */
+.modal__icon--danger {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
 .history-row.is-removing {
     opacity: 0;
     transform: translateY(-4px);
