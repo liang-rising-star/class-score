@@ -698,6 +698,45 @@ def print_pdf_direct(pdf_path, printer="", copies=1):
     return device
 
 
+def docx_to_pdf(docx_path, pdf_path=None, timeout=90):
+    """用本机 Office/WPS 把 docx 转成 PDF（无窗口），版面与 Word 完全一致。"""
+    if os.name != "nt" or not os.path.isfile(docx_path):
+        return None
+
+    pdf_path = pdf_path or (os.path.splitext(docx_path)[0] + ".pdf")
+    if os.path.exists(pdf_path) and os.path.getmtime(pdf_path) >= os.path.getmtime(docx_path):
+        return pdf_path
+
+    script = f'''
+$ErrorActionPreference = "Continue"
+try {{
+    $w = New-Object -ComObject Word.Application
+    $w.Visible = $false
+    $w.DisplayAlerts = 0
+    try {{
+        $d = $w.Documents.Open("{docx_path}", $false, $true)
+        $d.SaveAs2("{pdf_path}", 17)
+        $d.Close($false)
+    }} finally {{
+        try {{ $w.Quit() }} catch {{}}
+    }}
+}} catch {{ }}
+'''
+    try:
+        import subprocess
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, timeout=timeout,
+            creationflags=0x08000000 if os.name == "nt" else 0,
+        )
+    except Exception:
+        return None
+
+    if os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 0:
+        return pdf_path
+    return None
+
+
 def export_cards_pdf(codes, class_name, title, amount, issue_date, docx_path):
     """纯 Python 生成 PDF（不依赖 Office），文件名与 docx 同名。"""
     import pdf_cards
@@ -1899,6 +1938,13 @@ def ensure_batch_pdf(batch):
     if not filename:
         return None
     docx_path = os.path.join(get_output_dir(), filename)
+
+    # 优先用 WPS/Word 转换，版面与 Word 完全一致
+    converted = docx_to_pdf(docx_path)
+    if converted:
+        return converted
+
+    # Office 不可用时退回纯 Python 生成（版面对齐 docx，但细节可能有差异）
     try:
         return export_cards_pdf(
             batch["codes"], batch["class_name"], batch["title"],
@@ -1980,7 +2026,14 @@ async def barcode_png(request: Request, code: str):
                     headers={"Cache-Control": "public, max-age=3600"})
 
 
-# 直接调用系统打印（默认打印机），交给关联程序（Word / WPS）处理
+# 导出目录绝对路径
+def get_output_dir():
+    output_dir = read_config()["paths"]["output"]
+    if not os.path.isabs(output_dir):
+        output_dir = os.path.join(BASE_DIR, output_dir)
+    return os.path.realpath(output_dir)
+
+
 @app.get("/download/{filename}")
 async def download_file(request: Request, filename: str):
     if not get_current_user(request):
