@@ -122,116 +122,138 @@
     </dialog>
 
 <script>
-// 桌面版：隐藏 WebView2 渲染打印页并静默打印；过程中用弹窗显示进度
+// 打印进度弹窗：统一在这里管理，主按钮和历史条目共用
 (function() {
-    var btn = document.getElementById('printBtn');
-    var form = document.getElementById('printForm');
     var dlg = document.getElementById('printDialog');
     var fill = document.getElementById('printFill');
     var percent = document.getElementById('printPercent');
     var text = document.getElementById('printText');
     var title = document.getElementById('printTitle');
     var closeBtn = document.getElementById('printClose');
-    if (!btn || !form || !dlg) return;
+    if (!dlg) return;
 
-    var finished = false;
-    var fakeTimer = null;
-
-    function bridge() {
-        return (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects)
-            ? window.chrome.webview.hostObjects.desktopBridge : null;
-    }
+    var callbacks = {};       // token -> 完成回调
 
     function setProgress(value, label) {
         value = Math.max(0, Math.min(100, Math.round(value)));
+        fill.dataset.value = value;
         fill.style.width = value + '%';
         percent.textContent = value + '%';
         if (label) text.textContent = label;
     }
 
-    function finish(ok, label) {
-        if (finished) return;
-        finished = true;
-        if (fakeTimer) { clearInterval(fakeTimer); fakeTimer = null; }
+    function open(subtitle) {
+        dlg.classList.remove('is-error');
+        title.textContent = '正在打印';
+        closeBtn.disabled = true;
+        closeBtn.textContent = '请稍候…';
+        setProgress(4, subtitle || '准备打印页面…');
+        if (!dlg.open) dlg.showModal();
+    }
 
+    function finish(ok, label) {
         setProgress(ok ? 100 : Number(fill.dataset.value || 0), label);
         title.textContent = ok ? '打印任务已发送' : '打印失败';
         dlg.classList.toggle('is-error', !ok);
         closeBtn.disabled = false;
         closeBtn.textContent = '关闭';
-        btn.disabled = false;
-        setTimeout(function() { if (ok) close(); }, ok ? 900 : 0);
+        if (ok) setTimeout(close, 900);
     }
 
     function close() {
-        dlg.close();
-        btn.disabled = false;
+        if (dlg.open) dlg.close();
     }
 
-    // 桌面端会推送进度消息
+    closeBtn.addEventListener('click', close);
+
+    window.PrintProgress = {
+        open: open,
+        update: setProgress,
+        finish: finish,
+        close: close,
+        onDone: function(token, fn) { callbacks[token] = fn; }
+    };
+
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.addEventListener('message', function(e) {
             var d = e.data;
-            if (!d || d.type !== 'print-progress' || d.token !== 'main') return;
-            fill.dataset.value = d.value;
+            if (!d || d.type !== 'print-progress') return;
+
             if (d.done) {
                 finish(!d.error, d.text);
+                var fn = callbacks[d.token];
+                if (fn) { delete callbacks[d.token]; fn(d); }
             } else {
                 setProgress(d.value, d.text);
             }
         });
     }
+})();
 
-    closeBtn.addEventListener('click', close);
+// 生成结果面板的「直接打印」
+(function() {
+    var btn = document.getElementById('printBtn');
+    var form = document.getElementById('printForm');
+    if (!btn || !form) return;
 
-    // 当前批次：保存成功后标记（桌面端要等真正写盘完成）
+    var bridge = function() {
+        return (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects)
+            ? window.chrome.webview.hostObjects.desktopBridge : null;
+    };
+
+    // 当前批次的保存：桌面端写盘完成后标记
     var saveLink = document.querySelector('.success-panel a[href^="/download/"]');
     var currentBatch = "{{ batch_id or '' }}";
-    if (saveLink && currentBatch) {
+    if (saveLink && currentBatch && window.chrome && window.chrome.webview) {
         var saveName = saveLink.getAttribute('href').split('/').pop();
-
-        if (window.chrome && window.chrome.webview) {
-            window.chrome.webview.addEventListener('message', function(e) {
-                var d = e.data;
-                if (!d || d.type !== 'download' || d.state !== 'completed') return;
-                if (d.filename !== decodeURIComponent(saveName)) return;
-                fetch('/history/' + currentBatch + '/saved', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'csrf_token=' + encodeURIComponent("{{ csrf_token }}")
-                });
+        window.chrome.webview.addEventListener('message', function(e) {
+            var d = e.data;
+            if (!d || d.type !== 'download' || d.state !== 'completed') return;
+            if (d.filename !== decodeURIComponent(saveName)) return;
+            fetch('/history/' + currentBatch + '/saved', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'csrf_token=' + encodeURIComponent("{{ csrf_token }}")
             });
-        }
+        });
     }
 
     btn.addEventListener('click', function() {
-        btn.disabled = true;
-        finished = false;
-        dlg.classList.remove('is-error');
-        title.textContent = '正在打印';
-        closeBtn.disabled = true;
-        closeBtn.textContent = '请稍候…';
-        setProgress(4, '准备打印页面…');
-        dlg.showModal();
-
         var b = bridge();
+        if (window.PrintProgress) window.PrintProgress.open();
+
         if (!b) {
-            // 网页版：无法获知进度，走到一半就交给系统
-            var v = 4;
-            fakeTimer = setInterval(function() {
-                v = Math.min(70, v + 8);
-                setProgress(v, '正在交给系统打印…');
-            }, 180);
-            setTimeout(function() { finish(true, '已交由系统打印，请确认打印机'); }, 900);
+            // 网页版：交给系统打印
+            if (window.PrintProgress) {
+                var v = 4;
+                var timer = setInterval(function() {
+                    v = Math.min(70, v + 8);
+                    window.PrintProgress.update(v, '正在交给系统打印…');
+                }, 180);
+                setTimeout(function() {
+                    clearInterval(timer);
+                    window.PrintProgress.finish(true, '已交由系统打印，请确认打印机');
+                }, 900);
+            }
             form.submit();
             return;
         }
 
-        b.PrintUrl(location.origin + '/print-sheet', btn.dataset.printer || '', 'main')
+        var btnEl = btn;
+        btnEl.disabled = true;
+        window.PrintProgress.onDone('main', function() { btnEl.disabled = false; });
+
+        b.PrintUrl(location.origin + '/print-sheet', btnEl.dataset.printer || '', 'main')
             .then(function(r) {
-                if (r && r.indexOf('queued') !== 0) finish(false, '打印失败：' + r);
+                if (r && r.indexOf('queued') !== 0) {
+                    btnEl.disabled = false;
+                    if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + r);
+                }
             })
-            .catch(function(err) { finish(false, '打印失败：' + err); });
+            .catch(function(err) {
+                btnEl.disabled = false;
+                if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + err);
+            });
     });
 })();
 </script>

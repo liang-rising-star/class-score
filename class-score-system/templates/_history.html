@@ -133,7 +133,6 @@
                 pendingPrint = null;
                 if (d.error) {
                     resetPrint(job2.row.querySelector('.history-print'));
-                    alert(d.text);
                 } else {
                     post('/history/' + job2.batchId + '/printed').then(function() { dropRow(job2.row); });
                 }
@@ -196,17 +195,20 @@
             printBtn.disabled = true;
             printBtn.textContent = '打印中…';
             pendingPrint = { batchId: printBtn.dataset.batch, row: row };
+
+            if (window.PrintProgress) window.PrintProgress.open('准备该批次的打印页面…');
+
             var url = location.origin + '/print-sheet?id=' + encodeURIComponent(printBtn.dataset.batch);
             b.PrintUrl(url, printBtn.dataset.printer || '', printBtn.dataset.batch).then(function(r) {
                 if (!r || r.indexOf('queued') !== 0) {
                     pendingPrint = null;
                     resetPrint(printBtn);
-                    alert('打印失败：' + r);
+                    if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + r);
                 }
             }).catch(function(err) {
                 pendingPrint = null;
                 resetPrint(printBtn);
-                alert('打印失败：' + err);
+                if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + err);
             });
             return;
         }
