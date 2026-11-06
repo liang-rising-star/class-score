@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -17,6 +18,9 @@ internal static class Program
     /// <summary>单实例互斥体；整体重启时会先释放，交给新进程。</summary>
     /// <summary>主窗口的 WebView2 环境，隐藏打印窗体复用它（共享 cookie 与浏览器进程）。</summary>
     internal static CoreWebView2Environment? BrowserEnvironment;
+
+    /// <summary>主窗口的 WebView2，打印进度通过它 postMessage 给页面。</summary>
+    internal static WebView2? MainView;
 
     internal static Mutex? InstanceMutex;
     internal static EventWaitHandle? ShowWindowEvent;
@@ -627,6 +631,7 @@ internal sealed class MainForm : Form
             try
             {
                 Program.BrowserEnvironment = _web.CoreWebView2.Environment;
+                Program.MainView = _web;
                 _web.CoreWebView2.AddHostObjectToScript("desktopBridge", new DesktopBridge(this));
                 AppLog.Write("host bridge registered");
             }
@@ -657,6 +662,26 @@ public class DesktopBridge
     private readonly Form _owner;
 
     public DesktopBridge(Form owner) => _owner = owner;
+
+    /// <summary>把打印进度推给页面（值 0-100）。</summary>
+    private static void Report(int value, string text, bool done = false, bool error = false)
+    {
+        try
+        {
+            var view = Program.MainView;
+            if (view?.CoreWebView2 is null) return;
+            var payload = new Dictionary<string, object>
+            {
+                ["type"] = "print-progress",
+                ["value"] = value,
+                ["text"] = text,
+                ["done"] = done,
+                ["error"] = error
+            };
+            view.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(payload));
+        }
+        catch { }
+    }
 
     /// <summary>用隐藏的 WebView2 加载打印页并静默打印（不启动 WPS/Word）。</summary>
     public string PrintUrl(string url, string printerName)
@@ -701,20 +726,25 @@ public class DesktopBridge
             host.Controls.Add(view);
             host.Show();
 
+            Report(10, "准备打印页面…");
             await view.EnsureCoreWebView2Async(environment);
 
             var loaded = new TaskCompletionSource<bool>();
             view.CoreWebView2.NavigationCompleted += (_, e) => loaded.TrySetResult(e.IsSuccess);
             view.CoreWebView2.Navigate(url);
 
+            Report(40, "加载卡片页面…");
             if (!await loaded.Task)
             {
                 AppLog.Write("print: 打印页加载失败");
+                Report(100, "打印页加载失败", done: true, error: true);
                 return;
             }
 
             // 等条码图片与字体渲染完
+            Report(62, "渲染条码与排版…");
             await Task.Delay(900);
+            Report(78, "排版完成，准备发送…");
 
             var settings = view.CoreWebView2.Environment.CreatePrintSettings();
             settings.ShouldPrintBackgrounds = true;
@@ -725,12 +755,18 @@ public class DesktopBridge
             settings.MarginRight = 0;
             if (!string.IsNullOrWhiteSpace(printerName)) settings.PrinterName = printerName;
 
+            Report(88, "正在发送到打印机…");
             var result = await view.CoreWebView2.PrintAsync(settings);
-            AppLog.Write($"print: {result} -> {(string.IsNullOrWhiteSpace(printerName) ? "系统默认打印机" : printerName)}");
+            var target = string.IsNullOrWhiteSpace(printerName) ? "系统默认打印机" : printerName;
+            AppLog.Write($"print: {result} -> {target}");
+
+            var ok = result == CoreWebView2PrintStatus.Succeeded;
+            Report(100, ok ? $"已发送到 {target}" : $"打印失败：{result}", done: true, error: !ok);
         }
         catch (Exception ex)
         {
             AppLog.Write("print: 失败 " + ex.Message);
+            Report(100, "打印失败：" + ex.Message, done: true, error: true);
         }
         finally
         {
