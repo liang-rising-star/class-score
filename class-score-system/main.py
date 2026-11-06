@@ -772,6 +772,24 @@ def send_to_printer(filepath, printer=""):
     return target
 
 
+FONT_CACHE_DIR = None
+
+
+def export_cards_pdf(codes, class_name, title, amount, issue_date, docx_path):
+    """纯 Python 生成 PDF（不依赖 Office），文件名与 docx 同名。"""
+    import pdf_cards
+
+    pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
+    if os.path.exists(pdf_path) and os.path.getmtime(pdf_path) >= os.path.getmtime(docx_path):
+        return pdf_path
+
+    def barcode_bytes(code):
+        return generate_barcode_image(code).getvalue()
+
+    return pdf_cards.build_cards_pdf(
+        codes, class_name, title, amount, issue_date, pdf_path, barcode_bytes)
+
+
 def docx_to_pdf(docx_path, pdf_path=None, timeout=90):
     """用本机 Office/WPS 把 docx 转成 PDF（无窗口）。成功返回 pdf 路径，否则 None。"""
     if os.name != "nt" or not os.path.isfile(docx_path):
@@ -1966,22 +1984,17 @@ def print_now(request: Request, filename: str = Form(None), batch_id: str = Form
     if not sess:
         raise HTTPException(status_code=403, detail="请先登录")
 
-    if not filename and batch_id:
-        batch = history_find(batch_id)
-        filename = (batch or {}).get("filename")
-    if not filename:
-        filename = (sess.get("gen") or {}).get("filename")
-    if not filename:
-        return {"ok": False, "message": "没有可打印的批次"}
+    batch = history_find(batch_id) if batch_id else (sess.get("gen") or {})
+    if not batch:
+        batch = sess.get("gen") or {}
 
-    name = os.path.basename(filename.replace("\\", "/"))
-    docx_path = os.path.join(get_output_dir(), name)
-    if not os.path.isfile(docx_path):
-        return {"ok": False, "message": "导出文件不存在"}
+    name = os.path.basename((batch.get("filename") or "").replace("\\", "/"))
+    if not name:
+        return {"ok": False, "message": "没有可打印的批次"}
 
     printer = (read_config().get("print", {}) or {}).get("printer", "") or ""
 
-    pdf_path = docx_to_pdf(docx_path)
+    pdf_path = ensure_batch_pdf(batch)
     if not pdf_path:
         return {"ok": False, "message": "PDF 生成失败，无法打印"}
 
@@ -1994,6 +2007,22 @@ def print_now(request: Request, filename: str = Form(None), batch_id: str = Form
     return {"ok": True, "message": f"已发送到 {used}"}
 
 
+def ensure_batch_pdf(batch):
+    """按批次数据生成 PDF（纯 Python），返回路径或 None。"""
+    if not batch or not batch.get("codes"):
+        return None
+    filename = os.path.basename((batch.get("filename") or "").replace("\\", "/"))
+    if not filename:
+        return None
+    docx_path = os.path.join(get_output_dir(), filename)
+    try:
+        return export_cards_pdf(
+            batch["codes"], batch["class_name"], batch["title"],
+            batch["amount"], batch["issue_date"], docx_path)
+    except Exception:
+        return None
+
+
 # 打印用 PDF：按需把导出目录里的 docx 转成 PDF（同目录同名）
 @app.api_route("/print-pdf", methods=["GET", "HEAD"])
 def print_pdf(request: Request, id: str = None):
@@ -2001,23 +2030,11 @@ def print_pdf(request: Request, id: str = None):
     if not sess:
         return RedirectResponse(url="/login", status_code=303)
 
-    filename = None
-    if id:
-        batch = history_find(id)
-        if batch:
-            filename = batch.get("filename")
-    if not filename:
-        current = sess.get("gen") or {}
-        filename = current.get("filename")
-    if not filename:
+    batch = history_find(id) if id else (sess.get("gen") or {})
+    if not batch:
         raise HTTPException(status_code=404, detail="没有可打印的批次")
 
-    name = os.path.basename(filename.replace("\\", "/"))
-    docx_path = os.path.join(get_output_dir(), name)
-    if not os.path.isfile(docx_path):
-        raise HTTPException(status_code=404, detail="导出文件不存在")
-
-    pdf_path = docx_to_pdf(docx_path)
+    pdf_path = ensure_batch_pdf(batch)
     if not pdf_path:
         raise HTTPException(status_code=500, detail="PDF 生成失败")
 
