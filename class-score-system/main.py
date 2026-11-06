@@ -13,6 +13,7 @@ import time
 import threading
 import zipfile
 import secrets
+import urllib.parse
 import uuid
 import string
 import barcode
@@ -1819,10 +1820,14 @@ def print_pdf(request: Request, id: str = None):
     if not pdf_path:
         raise HTTPException(status_code=500, detail="PDF 生成失败")
 
+    pdf_name = os.path.basename(pdf_path)
+    pdf_header = urllib.parse.quote(pdf_name)      # 中文文件名不能直接进 HTTP 头
     if request.method == "HEAD":
-        return Response(status_code=200, media_type="application/pdf")
+        return Response(status_code=200, media_type="application/pdf",
+                        headers={"X-Pdf-Name": pdf_header})
 
-    return FileResponse(pdf_path, filename=os.path.basename(pdf_path), media_type="application/pdf")
+    return FileResponse(pdf_path, filename=pdf_name, media_type="application/pdf",
+                        headers={"X-Pdf-Name": pdf_header})
 
 
 # 打印页：把卡片渲染成 A4 网格，由桌面版静默打印（不经过 WPS/Word）

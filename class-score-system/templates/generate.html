@@ -167,11 +167,16 @@
     closeBtn.addEventListener('click', close);
 
     // 优先用导出的 PDF（和 Word 完全一致），生成失败时回退到 HTML 打印页
-    window.resolvePrintUrl = function(batchId) {
+    window.resolvePrintTarget = function(batchId) {
         var q = batchId ? ('?id=' + encodeURIComponent(batchId)) : '';
         return fetch('/print-pdf' + q, { method: 'HEAD' })
-            .then(function(r) { return r.ok ? ('/print-pdf' + q) : ('/print-sheet' + q); })
-            .catch(function() { return '/print-sheet' + q; });
+            .then(function(r) {
+                if (!r.ok) return { kind: 'sheet', url: '/print-sheet' + q };
+                var name = r.headers.get('X-Pdf-Name');
+                if (name) { try { name = decodeURIComponent(name); } catch (e) {} }
+                return name ? { kind: 'pdf', name: name } : { kind: 'sheet', url: '/print-sheet' + q };
+            })
+            .catch(function() { return { kind: 'sheet', url: '/print-sheet' + q }; });
     };
 
     window.PrintProgress = {
@@ -252,12 +257,28 @@
         window.PrintProgress.onDone('main', function() { btnEl.disabled = false; });
         window.PrintProgress.update(12, '正在生成 PDF…');
 
-        window.resolvePrintUrl('')
-            .then(function(target) {
-                return b.PrintUrl(location.origin + target, btnEl.dataset.printer || '', 'main');
+        var viaPdf = false;
+        window.resolvePrintTarget('')
+            .then(function(t) {
+                viaPdf = (t.kind === 'pdf');
+                if (viaPdf) {
+                    window.PrintProgress.update(60, '正在发送到打印机…');
+                    return b.PrintPdf(t.name, btnEl.dataset.printer || '');
+                }
+                return b.PrintUrl(location.origin + t.url, btnEl.dataset.printer || '', 'main');
             })
             .then(function(r) {
-                if (r && r.indexOf('queued') !== 0) {
+                var queued = !!r && r.indexOf('queued') === 0;
+                // PDF 走系统打印，没有后续进度消息，这里直接收尾
+                if (viaPdf) {
+                    btnEl.disabled = false;
+                    if (window.PrintProgress) {
+                        if (queued) window.PrintProgress.finish(true, '已发送到打印机');
+                        else window.PrintProgress.finish(false, '打印失败：' + r);
+                    }
+                    return;
+                }
+                if (!queued) {
                     btnEl.disabled = false;
                     if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + r);
                 }

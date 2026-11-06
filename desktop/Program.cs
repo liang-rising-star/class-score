@@ -705,6 +705,40 @@ public class DesktopBridge
 
     public DesktopBridge(Form owner) => _owner = owner;
 
+    /// <summary>调用系统关联程序打印 output 目录下的 PDF；返回 queued 或 failed:原因。</summary>
+    public string PrintPdf(string pdfFileName, string printerName)
+    {
+        try
+        {
+            var root = Program.RootPath;
+            if (string.IsNullOrEmpty(root)) return "failed: 未找到项目目录";
+
+            var name = Path.GetFileName(pdfFileName ?? "");
+            if (string.IsNullOrWhiteSpace(name)) return "failed: 文件名为空";
+
+            var path = Path.Combine(root, "class-score-system", "data", "output", name);
+            if (!File.Exists(path)) return "failed: PDF 不存在";
+
+            var usePrinter = !string.IsNullOrWhiteSpace(printerName);
+            var psi = new ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true,
+                Verb = usePrinter ? "printto" : "print",
+                Arguments = usePrinter ? $"\"{printerName}\"" : "",
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+            Process.Start(psi);
+            AppLog.Write($"print-pdf: 已交给系统打印 {name} -> {(usePrinter ? printerName : "默认打印机")}");
+            return "queued";
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("print-pdf 失败: " + ex.Message);
+            return "failed: " + ex.Message;
+        }
+    }
+
     /// <summary>用系统关联程序把最近生成的 PDF 送去打印（WebView2 打印失败时的兜底）。</summary>
     private static bool TrySystemPrintPdf(string printerName)
     {

@@ -198,15 +198,35 @@
 
             if (window.PrintProgress) window.PrintProgress.open('正在生成该批次的 PDF…');
 
-            var resolve = window.resolvePrintUrl || function(id) {
-                return Promise.resolve('/print-sheet?id=' + encodeURIComponent(id));
+            var resolve = window.resolvePrintTarget || function(id) {
+                return Promise.resolve({ kind: 'sheet', url: '/print-sheet?id=' + encodeURIComponent(id) });
             };
+            var viaPdf = false;
             resolve(printBtn.dataset.batch)
-                .then(function(target) {
-                    return b.PrintUrl(location.origin + target, printBtn.dataset.printer || '', printBtn.dataset.batch);
+                .then(function(t) {
+                    viaPdf = (t.kind === 'pdf');
+                    if (viaPdf) {
+                        if (window.PrintProgress) window.PrintProgress.update(60, '正在发送到打印机…');
+                        return b.PrintPdf(t.name, printBtn.dataset.printer || '');
+                    }
+                    return b.PrintUrl(location.origin + t.url, printBtn.dataset.printer || '', printBtn.dataset.batch);
                 })
                 .then(function(r) {
-                if (!r || r.indexOf('queued') !== 0) {
+                var queued = !!r && r.indexOf('queued') === 0;
+                if (viaPdf) {
+                    // 系统打印没有后续回执，发送成功即视为完成
+                    if (queued) {
+                        pendingPrint = null;
+                        if (window.PrintProgress) window.PrintProgress.finish(true, '已发送到打印机');
+                        post('/history/' + printBtn.dataset.batch + '/printed').then(function() { dropRow(row); });
+                    } else {
+                        pendingPrint = null;
+                        resetPrint(printBtn);
+                        if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + r);
+                    }
+                    return;
+                }
+                if (!queued) {
                     pendingPrint = null;
                     resetPrint(printBtn);
                     if (window.PrintProgress) window.PrintProgress.finish(false, '打印失败：' + r);
