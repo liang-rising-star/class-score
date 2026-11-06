@@ -41,13 +41,18 @@
 {% endif %}
 
 <script>
-// 待处理批次：打印 / 保存 / 删除之后立即从列表移除，不刷新整页
+// 待处理批次：只有「真正完成」才从列表移除
+//  - 保存：等桌面端通知下载写完盘（取消保存则保留）
+//  - 打印：等打印任务真正提交成功（失败/取消则保留）
+//  - 删除：即时移除
 (function() {
     var card = document.querySelector('.history-card');
     if (!card) return;
 
     var csrfInput = document.querySelector('input[name="csrf_token"]');
     var csrf = csrfInput ? csrfInput.value : '';
+    var pendingSave = null;     // { batchId, row, filename }
+    var pendingPrint = null;    // { batchId, row }
 
     function bridge() {
         return (window.chrome && window.chrome.webview && window.chrome.webview.hostObjects)
@@ -71,6 +76,12 @@
         }, 200);
     }
 
+    function resetPrint(btn) {
+        if (!btn) return;
+        btn.disabled = false;
+        btn.textContent = '打印';
+    }
+
     function startDownload(filename) {
         var a = document.createElement('a');
         a.href = '/download/' + encodeURIComponent(filename);
@@ -78,6 +89,38 @@
         document.body.appendChild(a);
         a.click();
         a.remove();
+    }
+
+    // 桌面端消息：下载完成/取消
+    if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.addEventListener('message', function(e) {
+            var d = e.data;
+            if (!d) return;
+
+            if (d.type === 'download' && pendingSave) {
+                if (d.state === 'completed' && d.filename === pendingSave.filename) {
+                    var job = pendingSave;
+                    pendingSave = null;
+                    post('/history/' + job.batchId + '/saved').then(function() { dropRow(job.row); });
+                } else if (d.state === 'cancelled') {
+                    var btn = pendingSave.row.querySelector('.history-save');
+                    if (btn) { btn.disabled = false; btn.textContent = '保存'; }
+                    pendingSave = null;
+                }
+                return;
+            }
+
+            if (d.type === 'print-progress' && d.done && pendingPrint && d.token === pendingPrint.batchId) {
+                var job2 = pendingPrint;
+                pendingPrint = null;
+                if (d.error) {
+                    resetPrint(job2.row.querySelector('.history-print'));
+                    alert(d.text);
+                } else {
+                    post('/history/' + job2.batchId + '/printed').then(function() { dropRow(job2.row); });
+                }
+            }
+        });
     }
 
     card.addEventListener('click', function(e) {
@@ -89,27 +132,24 @@
 
         if (printBtn) {
             var b = bridge();
-            if (!b) {                              // 网页版：交系统打印（表单已存在时走表单）
+            if (!b) {                                   // 网页版：交给系统打印，由服务端标记
                 var form = row.querySelector('.history-print-form');
-                if (form) { form.submit(); return; }
-                post('/history/' + printBtn.dataset.batch + '/printed')
-                    .then(function(){ dropRow(row); });
+                if (form) form.submit();
                 return;
             }
             printBtn.disabled = true;
             printBtn.textContent = '打印中…';
+            pendingPrint = { batchId: printBtn.dataset.batch, row: row };
             var url = location.origin + '/print-sheet?id=' + encodeURIComponent(printBtn.dataset.batch);
-            b.PrintUrl(url, printBtn.dataset.printer || '').then(function(r) {
-                if (r && r.indexOf('queued') === 0) {
-                    post('/history/' + printBtn.dataset.batch + '/printed').then(function() { dropRow(row); });
-                } else {
-                    printBtn.disabled = false;
-                    printBtn.textContent = '打印';
+            b.PrintUrl(url, printBtn.dataset.printer || '', printBtn.dataset.batch).then(function(r) {
+                if (!r || r.indexOf('queued') !== 0) {
+                    pendingPrint = null;
+                    resetPrint(printBtn);
                     alert('打印失败：' + r);
                 }
             }).catch(function(err) {
-                printBtn.disabled = false;
-                printBtn.textContent = '打印';
+                pendingPrint = null;
+                resetPrint(printBtn);
                 alert('打印失败：' + err);
             });
             return;
@@ -117,10 +157,16 @@
 
         if (saveBtn) {
             saveBtn.disabled = true;
+            saveBtn.textContent = '保存中…';
+            pendingSave = { batchId: saveBtn.dataset.batch, row: row, filename: saveBtn.dataset.file };
             startDownload(saveBtn.dataset.file);
-            post('/history/' + saveBtn.dataset.batch + '/saved')
-                .then(function() { dropRow(row); })
-                .catch(function() { saveBtn.disabled = false; });
+
+            // 网页版没有桌面端回执，无法判断是否取消，按发起即完成处理
+            if (!(window.chrome && window.chrome.webview)) {
+                var job = pendingSave;
+                pendingSave = null;
+                post('/history/' + job.batchId + '/saved').then(function() { dropRow(job.row); });
+            }
             return;
         }
 

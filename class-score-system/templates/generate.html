@@ -172,7 +172,7 @@
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.addEventListener('message', function(e) {
             var d = e.data;
-            if (!d || d.type !== 'print-progress') return;
+            if (!d || d.type !== 'print-progress' || d.token !== 'main') return;
             fill.dataset.value = d.value;
             if (d.done) {
                 finish(!d.error, d.text);
@@ -183,6 +183,26 @@
     }
 
     closeBtn.addEventListener('click', close);
+
+    // 当前批次：保存成功后标记（桌面端要等真正写盘完成）
+    var saveLink = document.querySelector('.success-panel a[href^="/download/"]');
+    var currentBatch = "{{ batch_id or '' }}";
+    if (saveLink && currentBatch) {
+        var saveName = saveLink.getAttribute('href').split('/').pop();
+
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.addEventListener('message', function(e) {
+                var d = e.data;
+                if (!d || d.type !== 'download' || d.state !== 'completed') return;
+                if (d.filename !== decodeURIComponent(saveName)) return;
+                fetch('/history/' + currentBatch + '/saved', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'csrf_token=' + encodeURIComponent("{{ csrf_token }}")
+                });
+            });
+        }
+    }
 
     btn.addEventListener('click', function() {
         btn.disabled = true;
@@ -207,7 +227,7 @@
             return;
         }
 
-        b.PrintUrl(location.origin + '/print-sheet', btn.dataset.printer || '')
+        b.PrintUrl(location.origin + '/print-sheet', btn.dataset.printer || '', 'main')
             .then(function(r) {
                 if (r && r.indexOf('queued') !== 0) finish(false, '打印失败：' + r);
             })

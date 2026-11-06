@@ -1863,7 +1863,8 @@ async def download_file(request: Request, filename: str):
     if not inside or not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="文件不存在")
 
-    history_mark(name, "saved")
+    # 是否真的保存成功由客户端确认（用户可能在“另存为”里取消），
+    # 桌面端写盘完成后会调用 /history/{id}/saved
 
     return FileResponse(
         filepath,

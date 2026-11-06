@@ -536,6 +536,23 @@ internal sealed class MainForm : Form
     }
 
     /// <summary>弹出“另存为”，让用户决定导出文件保存到哪里。</summary>
+    /// <summary>把下载结果发给页面（用户取消 / 真正写完盘）。</summary>
+    private static void NotifyDownload(string filename, string state)
+    {
+        try
+        {
+            var view = Program.MainView;
+            if (view?.CoreWebView2 is null) return;
+            view.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+            {
+                type = "download",
+                state,
+                filename
+            }));
+        }
+        catch { }
+    }
+
     private void ShowSaveDialog(CoreWebView2DownloadStartingEventArgs e)
     {
         try
@@ -554,14 +571,35 @@ internal sealed class MainForm : Form
                 AddExtension = true
             };
 
+            var fileName = Path.GetFileName(e.ResultFilePath);
+            if (string.IsNullOrWhiteSpace(fileName)) fileName = suggested;
+
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 e.ResultFilePath = dialog.FileName;
                 e.Handled = true;      // 使用我们指定的路径，不再弹 Edge 自己的下载提示
+
+                // 只有真正写盘完成才通知页面；中断/取消时通知取消
+                var operation = e.DownloadOperation;
+                if (operation is not null)
+                {
+                    operation.StateChanged += (_, _) =>
+                    {
+                        if (operation.State == CoreWebView2DownloadState.Completed)
+                        {
+                            NotifyDownload(fileName, "completed");
+                        }
+                        else if (operation.State == CoreWebView2DownloadState.Interrupted)
+                        {
+                            NotifyDownload(fileName, "cancelled");
+                        }
+                    };
+                }
             }
             else
             {
                 e.Cancel = true;       // 用户取消，直接中止下载
+                NotifyDownload(fileName, "cancelled");
             }
         }
         catch (Exception ex)
@@ -664,7 +702,7 @@ public class DesktopBridge
     public DesktopBridge(Form owner) => _owner = owner;
 
     /// <summary>把打印进度推给页面（值 0-100）。</summary>
-    private static void Report(int value, string text, bool done = false, bool error = false)
+    private static void Report(int value, string text, string token, bool done = false, bool error = false)
     {
         try
         {
@@ -676,7 +714,8 @@ public class DesktopBridge
                 ["value"] = value,
                 ["text"] = text,
                 ["done"] = done,
-                ["error"] = error
+                ["error"] = error,
+                ["token"] = token
             };
             view.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(payload));
         }
@@ -684,13 +723,13 @@ public class DesktopBridge
     }
 
     /// <summary>用隐藏的 WebView2 加载打印页并静默打印（不启动 WPS/Word）。</summary>
-    public string PrintUrl(string url, string printerName)
+    public string PrintUrl(string url, string printerName, string token)
     {
         if (string.IsNullOrWhiteSpace(url)) return "failed: empty url";
 
         try
         {
-            _owner.BeginInvoke(new Action(() => { _ = PrintHiddenAsync(url, printerName); }));
+            _owner.BeginInvoke(new Action(() => { _ = PrintHiddenAsync(url, printerName, token ?? ""); }));
             return "queued";
         }
         catch (Exception ex)
@@ -700,7 +739,7 @@ public class DesktopBridge
         }
     }
 
-    private async Task PrintHiddenAsync(string url, string printerName)
+    private async Task PrintHiddenAsync(string url, string printerName, string token)
     {
         Form? host = null;
         WebView2? view = null;
@@ -726,25 +765,25 @@ public class DesktopBridge
             host.Controls.Add(view);
             host.Show();
 
-            Report(10, "准备打印页面…");
+            Report(10, "准备打印页面…", token);
             await view.EnsureCoreWebView2Async(environment);
 
             var loaded = new TaskCompletionSource<bool>();
             view.CoreWebView2.NavigationCompleted += (_, e) => loaded.TrySetResult(e.IsSuccess);
             view.CoreWebView2.Navigate(url);
 
-            Report(40, "加载卡片页面…");
+            Report(40, "加载卡片页面…", token);
             if (!await loaded.Task)
             {
                 AppLog.Write("print: 打印页加载失败");
-                Report(100, "打印页加载失败", done: true, error: true);
+                Report(100, "打印页加载失败", token, done: true, error: true);
                 return;
             }
 
             // 等条码图片与字体渲染完
-            Report(62, "渲染条码与排版…");
+            Report(62, "渲染条码与排版…", token);
             await Task.Delay(900);
-            Report(78, "排版完成，准备发送…");
+            Report(78, "排版完成，准备发送…", token);
 
             var settings = view.CoreWebView2.Environment.CreatePrintSettings();
             settings.ShouldPrintBackgrounds = true;
@@ -755,18 +794,18 @@ public class DesktopBridge
             settings.MarginRight = 0;
             if (!string.IsNullOrWhiteSpace(printerName)) settings.PrinterName = printerName;
 
-            Report(88, "正在发送到打印机…");
+            Report(88, "正在发送到打印机…", token);
             var result = await view.CoreWebView2.PrintAsync(settings);
             var target = string.IsNullOrWhiteSpace(printerName) ? "系统默认打印机" : printerName;
             AppLog.Write($"print: {result} -> {target}");
 
             var ok = result == CoreWebView2PrintStatus.Succeeded;
-            Report(100, ok ? $"已发送到 {target}" : $"打印失败：{result}", done: true, error: !ok);
+            Report(100, ok ? $"已发送到 {target}" : $"打印失败：{result}", token, done: true, error: !ok);
         }
         catch (Exception ex)
         {
             AppLog.Write("print: 失败 " + ex.Message);
-            Report(100, "打印失败：" + ex.Message, done: true, error: true);
+            Report(100, "打印失败：" + ex.Message, token, done: true, error: true);
         }
         finally
         {
