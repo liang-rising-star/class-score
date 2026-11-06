@@ -186,6 +186,9 @@ def get_default_config():
         },
         "desktop": {
             "autostart": False
+        },
+        "print": {
+            "printer": ""
         }
     }
 
@@ -428,6 +431,88 @@ def _enable_dpi_awareness():
         ctypes.windll.user32.SetProcessDPIAware()
     except Exception:
         pass
+
+
+def list_printers():
+    """返回 (打印机名列表, 系统默认打印机)。非 Windows 返回空。"""
+    if os.name != "nt":
+        return [], ""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        winspool = ctypes.WinDLL("winspool.drv")
+
+        default = ""
+        size = wintypes.DWORD(0)
+        winspool.GetDefaultPrinterW(None, ctypes.byref(size))
+        if size.value:
+            buf = ctypes.create_unicode_buffer(size.value)
+            if winspool.GetDefaultPrinterW(buf, ctypes.byref(size)):
+                default = buf.value or ""
+
+        class PRINTER_INFO_4(ctypes.Structure):
+            _fields_ = [
+                ("pPrinterName", wintypes.LPWSTR),
+                ("pServerName", wintypes.LPWSTR),
+                ("Attributes", wintypes.DWORD),
+            ]
+
+        needed, returned = wintypes.DWORD(0), wintypes.DWORD(0)
+        winspool.EnumPrintersW(6, None, 4, None, 0,
+                               ctypes.byref(needed), ctypes.byref(returned))
+        names = []
+        if needed.value:
+            buf = ctypes.create_string_buffer(needed.value)
+            ok = winspool.EnumPrintersW(6, None, 4, buf, needed.value,
+                                        ctypes.byref(needed), ctypes.byref(returned))
+            if ok:
+                arr = ctypes.cast(buf, ctypes.POINTER(PRINTER_INFO_4 * returned.value)).contents
+                names = [arr[i].pPrinterName for i in range(returned.value)]
+        return [n for n in names if n], default
+    except Exception:
+        return [], ""
+
+
+def _set_default_printer(name):
+    try:
+        import ctypes
+        return bool(ctypes.WinDLL("winspool.drv").SetDefaultPrinterW(name))
+    except Exception:
+        return False
+
+
+def print_document(filepath, printer=""):
+    """打印 docx；printer 为空则用系统默认打印机。返回实际使用的打印机名。"""
+    if os.name != "nt":
+        raise OSError("仅支持 Windows 打印")
+
+    names, default = list_printers()
+    target = printer or default
+
+    if not printer:
+        os.startfile(filepath, "print")
+        return target or "系统默认打印机"
+
+    # 指定打印机：优先用 printto 动词，失败则临时改默认打印机再还原
+    try:
+        import ctypes
+        rc = ctypes.windll.shell32.ShellExecuteW(
+            None, "printto", filepath, f'"{printer}"', None, 0)
+        if rc > 32:
+            return target
+    except Exception:
+        pass
+
+    original = default
+    if not _set_default_printer(printer):
+        raise OSError(f"无法切换到打印机：{printer}")
+    try:
+        os.startfile(filepath, "print")
+    finally:
+        if original:
+            _set_default_printer(original)
+    return target
 
 
 def pick_folder(title="选择文件夹"):
@@ -1279,6 +1364,8 @@ async def setting(request: Request):
         interval_value = int(round(float(backup_cfg.get("interval_hours", 24) or 0)))
     except (TypeError, ValueError):
         interval_value = 24
+    printers, default_printer = list_printers()
+    print_cfg = config.get("print", {}) or {}
     out_count, out_size = output_stats()
     junk_count, junk_size = junk_stats()
 
@@ -1295,6 +1382,9 @@ async def setting(request: Request):
         "interval_hours": interval_value,
         "backup_keep": backup_cfg.get("keep", 10),
         "autostart": bool((config.get("desktop") or {}).get("autostart", False)),
+        "printers": printers,
+        "default_printer": default_printer,
+        "printer_value": print_cfg.get("printer", "") or "",
         "cache_count": out_count,
         "cache_size": human_size(out_size),
         "junk_count": junk_count,
@@ -1412,6 +1502,32 @@ async def backup_settings(request: Request, interval_hours: int = Form(24),
     return RedirectResponse(url="/setting", status_code=303)
 
 
+@app.post("/print/settings")
+async def print_settings(request: Request, printer: str = Form(""), csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    printer = (printer or "").strip()
+    if printer:
+        names, _ = list_printers()
+        if printer not in names:
+            sess["notice"] = {"kind": "error", "text": f"找不到该打印机：{printer}"}
+            return RedirectResponse(url="/setting", status_code=303)
+
+    config = read_config()
+    config.setdefault("print", {})
+    config["print"]["printer"] = printer
+    write_config(config)
+
+    sess["notice"] = {
+        "kind": "success",
+        "text": f"打印将使用：{printer}" if printer else "打印将使用系统默认打印机",
+    }
+    return RedirectResponse(url="/setting", status_code=303)
+
+
 @app.post("/desktop/autostart")
 async def desktop_autostart(request: Request, autostart: str = Form(None),
                             csrf_token: str = Form(None)):
@@ -1498,9 +1614,10 @@ async def print_document(request: Request, filename: str = Form(...),
         sess["gen_notice"] = {"kind": "error", "text": "找不到要打印的文件"}
         return RedirectResponse(url=target, status_code=303)
 
+    printer = (read_config().get("print", {}) or {}).get("printer", "") or ""
     try:
-        os.startfile(filepath, "print")      # Windows：用默认关联程序直接打印
-        sess["gen_notice"] = {"kind": "success", "text": f"已发送到默认打印机：{name}"}
+        used = print_document(filepath, printer)
+        sess["gen_notice"] = {"kind": "success", "text": f"已发送到打印机：{used}"}
     except Exception as exc:
         sess["gen_notice"] = {"kind": "error", "text": f"无法调用打印机：{exc}"}
 

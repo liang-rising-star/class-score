@@ -32,6 +32,9 @@ def get_default_config():
         },
         "desktop": {
             "autostart": False
+        },
+        "print": {
+            "printer": ""
         }
     }
 
