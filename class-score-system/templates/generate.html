@@ -78,12 +78,8 @@
                 </h3>
                 <p>已生成 {{ quantity }} 张积分卡并导出 Word 文档</p>
                 <div class="form-actions">
-                    <form action="/print" method="post" id="printForm">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <input type="hidden" name="filename" value="{{ filename }}">
-                        <button type="button" id="printBtn" class="btn"
-                                data-printer="{{ printer_value }}">直接打印</button>
-                    </form>
+                    <button type="button" id="printBtn" class="btn"
+                            data-printer="{{ printer_value }}">直接打印</button>
                     <a href="/download/{{ filename }}" class="btn btn-ghost">保存 Word 文档</a>
                     <span class="file-chip">{{ filename }}</span>
                 </div>

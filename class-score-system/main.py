@@ -698,83 +698,6 @@ def print_pdf_direct(pdf_path, printer="", copies=1):
     return device
 
 
-def print_docx(docx_path, printer=""):
-    """用本机 Office/WPS 以 100% 比例直接打印 docx（不经 PDF 阅读器，不会额外加边距/缩放）。"""
-    if os.name != "nt":
-        raise OSError("仅支持 Windows 打印")
-    if not os.path.isfile(docx_path):
-        raise OSError("导出文件不存在")
-
-    original = ""
-    if printer:
-        _, original = list_printers()
-        if not _set_default_printer(printer):
-            raise OSError(f"无法切换到打印机：{printer}")
-
-    try:
-        script = f'''
-$ErrorActionPreference = "Continue"
-try {{
-    $w = New-Object -ComObject Word.Application
-    $w.Visible = $false
-    $w.DisplayAlerts = 0
-    try {{
-        $d = $w.Documents.Open("{docx_path}", $false, $true)
-        $d.PrintOut()
-        Start-Sleep -Milliseconds 1500
-        $d.Close($false)
-    }} finally {{
-        try {{ $w.Quit() }} catch {{}}
-    }}
-}} catch {{ }}
-'''
-        import subprocess
-        subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, timeout=180,
-            creationflags=0x08000000 if os.name == "nt" else 0,
-        )
-    finally:
-        if printer and original:
-            _set_default_printer(original)
-
-
-def send_to_printer(filepath, printer=""):
-    """打印 docx；printer 为空则用系统默认打印机。返回实际使用的打印机名。"""
-    if os.name != "nt":
-        raise OSError("仅支持 Windows 打印")
-
-    names, default = list_printers()
-    target = printer or default
-
-    if not printer:
-        os.startfile(filepath, "print")
-        return target or "系统默认打印机"
-
-    # 指定打印机：优先用 printto 动词，失败则临时改默认打印机再还原
-    try:
-        import ctypes
-        rc = ctypes.windll.shell32.ShellExecuteW(
-            None, "printto", filepath, f'"{printer}"', None, 0)
-        if rc > 32:
-            return target
-    except Exception:
-        pass
-
-    original = default
-    if not _set_default_printer(printer):
-        raise OSError(f"无法切换到打印机：{printer}")
-    try:
-        os.startfile(filepath, "print")
-    finally:
-        if original:
-            _set_default_printer(original)
-    return target
-
-
-FONT_CACHE_DIR = None
-
-
 def export_cards_pdf(codes, class_name, title, amount, issue_date, docx_path):
     """纯 Python 生成 PDF（不依赖 Office），文件名与 docx 同名。"""
     import pdf_cards
@@ -788,45 +711,6 @@ def export_cards_pdf(codes, class_name, title, amount, issue_date, docx_path):
 
     return pdf_cards.build_cards_pdf(
         codes, class_name, title, amount, issue_date, pdf_path, barcode_bytes)
-
-
-def docx_to_pdf(docx_path, pdf_path=None, timeout=90):
-    """用本机 Office/WPS 把 docx 转成 PDF（无窗口）。成功返回 pdf 路径，否则 None。"""
-    if os.name != "nt" or not os.path.isfile(docx_path):
-        return None
-
-    pdf_path = pdf_path or (os.path.splitext(docx_path)[0] + ".pdf")
-    if os.path.exists(pdf_path) and os.path.getmtime(pdf_path) >= os.path.getmtime(docx_path):
-        return pdf_path
-
-    script = f'''
-$ErrorActionPreference = "Continue"
-try {{
-    $w = New-Object -ComObject Word.Application
-    $w.Visible = $false
-    $w.DisplayAlerts = 0
-    try {{
-        $d = $w.Documents.Open("{docx_path}", $false, $true)
-        $d.SaveAs2("{pdf_path}", 17)
-        $d.Close($false)
-    }} finally {{
-        try {{ $w.Quit() }} catch {{}}
-    }}
-}} catch {{ }}
-'''
-    try:
-        import subprocess
-        subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, timeout=timeout,
-            creationflags=0x08000000 if os.name == "nt" else 0,
-        )
-    except Exception:
-        return None
-
-    if os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 0:
-        return pdf_path
-    return None
 
 
 def pick_folder(title="选择文件夹"):
@@ -2097,48 +1981,6 @@ async def barcode_png(request: Request, code: str):
 
 
 # 直接调用系统打印（默认打印机），交给关联程序（Word / WPS）处理
-@app.post("/print")
-async def print_document(request: Request, filename: str = Form(...),
-                         csrf_token: str = Form(None)):
-    check_csrf(request, csrf_token)
-    sid, sess = get_session(request)
-    if not sess:
-        return RedirectResponse(url="/login", status_code=303)
-
-    target = "/generate_result" if sess.get("gen") else "/generate"
-
-    name = os.path.basename(filename.replace("\\", "/"))
-    output_dir = get_output_dir()
-    filepath = os.path.realpath(os.path.join(output_dir, name))
-    try:
-        inside = os.path.commonpath([filepath, output_dir]) == output_dir
-    except ValueError:
-        inside = False
-
-    if not name or not name.lower().endswith(".docx") or not inside or not os.path.isfile(filepath):
-        sess["gen_notice"] = {"kind": "error", "text": "找不到要打印的文件"}
-        return RedirectResponse(url=target, status_code=303)
-
-    printer = (read_config().get("print", {}) or {}).get("printer", "") or ""
-    try:
-        used = send_to_printer(filepath, printer)
-        history_mark(name, "printed")
-        sess["gen_notice"] = {"kind": "success", "text": f"已发送到打印机：{used}"}
-    except Exception as exc:
-        sess["gen_notice"] = {"kind": "error", "text": f"无法调用打印机：{exc}"}
-
-    return RedirectResponse(url=target, status_code=303)
-
-
-# 导出目录绝对路径
-def get_output_dir():
-    output_dir = read_config()["paths"]["output"]
-    if not os.path.isabs(output_dir):
-        output_dir = os.path.join(BASE_DIR, output_dir)
-    return os.path.realpath(output_dir)
-
-
-# 下载生成的Word文件
 @app.get("/download/{filename}")
 async def download_file(request: Request, filename: str):
     if not get_current_user(request):

@@ -27,10 +27,6 @@
                 <button type="button" class="btn btn-ghost btn-sm history-save"
                         data-batch="{{ item.id }}"
                         data-file="{{ item.filename }}">保存</button>
-                <form action="/print" method="post" class="history-print-form">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <input type="hidden" name="filename" value="{{ item.filename }}">
-                </form>
                 <button type="button" class="btn btn-ghost btn-sm history-delete"
                         data-batch="{{ item.id }}">删除</button>
             </div>
