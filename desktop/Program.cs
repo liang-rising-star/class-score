@@ -370,6 +370,10 @@ internal sealed class BackendServer
             RedirectStandardError = true
         };
 
+        // 让后端知道桌面端的 exe 与根目录，设置「开机自启」时可直接写注册表（无需重启）
+        psi.Environment["CLASSSCORE_DESKTOP_EXE"] = Environment.ProcessPath ?? Application.ExecutablePath;
+        psi.Environment["CLASSSCORE_ROOT"] = _root;
+
         _process = Process.Start(psi)
                    ?? throw new InvalidOperationException("无法启动后端服务");
 

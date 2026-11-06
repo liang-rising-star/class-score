@@ -99,6 +99,19 @@ img,
     user-select: none;
 }
 
+/* 隐藏浏览器右侧滚动条（滚轮/触控板照常滚动） */
+html {
+    scrollbar-width: none;          /* Firefox */
+    -ms-overflow-style: none;       /* 旧 Edge */
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+}
+
 /* ------------------------------ 应用外壳 / 左侧菜单 ------------------------------ */
 
 .app-shell {
@@ -324,6 +337,7 @@ input[type="text"],
 input[type="number"],
 input[type="password"],
 input[type="file"],
+input[type="time"],
 textarea,
 select {
     width: 100%;
@@ -1008,6 +1022,178 @@ dialog.modal:focus-visible { outline: none; }
 .stat-value { font-size: 15px; font-weight: 650; color: var(--text-strong); font-variant-numeric: tabular-nums; }
 
 .form-actions form { display: inline; }
+
+/* 手搓时间选择器 */
+.tp { position: relative; }
+
+.tp__field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 44px;
+    padding: 0 14px;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--text);
+    background: #fff;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color .16s, box-shadow .16s;
+}
+
+.tp__field:hover { border-color: #b6c2d4; }
+
+.tp.is-open .tp__field {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 4px var(--primary-ring);
+}
+
+.tp__text {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .01em;
+}
+
+.tp__field svg { color: #64748b; }
+.tp.is-open .tp__field svg { color: var(--primary); }
+
+.tp__pop {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 8px);
+    left: 0;
+    width: 268px;
+    padding: 14px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 22px 48px rgba(15, 23, 42, .18);
+    max-height: calc(100vh - 32px);
+}
+
+/* 下方空间不够时向上弹 */
+.tp.is-flip .tp__pop {
+    top: auto;
+    bottom: calc(100% + 8px);
+}
+
+.tp__title {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.tp__preview {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 2px;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text-strong);
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 10px;
+}
+
+.tp__preview em {
+    font-style: normal;
+    color: var(--text-faint);
+    transform: translateY(-1px);
+}
+
+.tp__wheels {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    height: 200px;
+    margin-bottom: 10px;
+}
+
+/* 中间选中带 */
+.tp__band {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 40px;
+    margin-top: -20px;
+    border-radius: 10px;
+    background: var(--primary-soft);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.tp__wheel {
+    position: relative;
+    z-index: 1;
+    height: 200px;
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    scrollbar-width: none;
+    border-radius: 10px;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+}
+
+.tp__wheel::-webkit-scrollbar { display: none; }
+
+.tp__item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 40px;
+    font-family: inherit;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    scroll-snap-align: center;
+    transition: color .12s;
+}
+
+.tp__item:hover { color: var(--primary); }
+
+.tp__item.is-active {
+    color: var(--primary-dark);
+    font-weight: 700;
+}
+
+.tp__presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.tp__preset {
+    padding: 5px 10px;
+    font-family: inherit;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all .14s;
+    font-variant-numeric: tabular-nums;
+}
+
+.tp__preset:hover {
+    color: var(--primary-dark);
+    border-color: var(--primary);
+    background: var(--primary-soft);
+}
+
+.tp__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
 
 /* 开关滑块 */
 .switch {

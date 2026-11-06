@@ -27,7 +27,8 @@ def get_default_config():
             "password": ""
         },
         "backup": {
-            "interval_hours": 24,
+            "enabled": True,
+            "time": "02:00",
             "keep": 10
         },
         "desktop": {

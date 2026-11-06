@@ -43,11 +43,21 @@ async def get_logo():
 # 配置Jinja2模板（直接使用，绕过starlette缓存的bug）
 template_env = Environment(loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")), autoescape=True)
 
+def asset_version():
+    """静态资源版本号：CSS 改动后 URL 变化，浏览器不会继续用旧缓存。"""
+    path = os.path.join(BASE_DIR, "static", "css", "app.css")
+    try:
+        return int(os.path.getmtime(path))
+    except OSError:
+        return 0
+
+
 def render(request: Request, template_name: str, context: dict = None) -> HTMLResponse:
     """渲染模板，自动注入 CSRF token 并禁用缓存（避免登录态页面被浏览器缓存）。"""
     template = template_env.get_template(template_name)
     ctx = dict(context or {})
     ctx.setdefault("csrf_token", getattr(request.state, "csrf_token", ""))
+    ctx.setdefault("css_version", asset_version())
     html = template.render(**ctx)
     return HTMLResponse(html, headers={
         "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -192,7 +202,8 @@ def get_default_config():
             "password": ""
         },
         "backup": {
-            "interval_hours": 24,
+            "enabled": True,
+            "time": "02:00",
             "keep": 10
         },
         "desktop": {
@@ -261,7 +272,6 @@ def get_db_path():
 # ==================== 备份 / 清理 ====================
 
 BACKUP_PREFIX = "classscore-backup-"
-MAX_BACKUP_HOURS = 24 * 30      # 定时备份最长间隔 30 天
 MAX_BACKUP_KEEP = 200
 
 
@@ -319,19 +329,57 @@ def prune_backups():
             pass
 
 
+def parse_backup_time(text, default=(2, 0)):
+    """把 "HH:MM" 解析成 (时, 分)，非法时返回默认值。"""
+    try:
+        hour, minute = (text or "").strip().split(":")
+        hour, minute = int(hour), int(minute)
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour, minute
+    except (ValueError, AttributeError):
+        pass
+    return default
+
+
+def last_backup_date():
+    files = list_backups()
+    if not files:
+        return None
+    latest = os.path.join(get_backup_dir(), files[-1])
+    return datetime.datetime.fromtimestamp(os.path.getmtime(latest)).date()
+
+
+def next_backup_time():
+    """返回下一次自动备份的时间字符串；未开启时返回 None。"""
+    config = read_config()
+    section = config.get("backup", {}) or {}
+    if not section.get("enabled", True):
+        return None
+
+    hour, minute = parse_backup_time(section.get("time", "02:00"))
+    now = datetime.datetime.now()
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if now >= target and last_backup_date() == now.date():
+        target += datetime.timedelta(days=1)
+    elif now >= target:
+        return target.strftime("%Y-%m-%d %H:%M")
+    return target.strftime("%Y-%m-%d %H:%M")
+
+
 def _backup_loop():
-    """后台线程：按配置的间隔自动备份（interval_hours<=0 表示关闭）。"""
+    """后台线程：每天到点自动备份一次（跨天只在当天没备份时触发）。"""
     while True:
         try:
-            hours = float(read_config().get("backup", {}).get("interval_hours", 24) or 0)
-            if hours > 0:
-                files = list_backups()
-                last = os.path.getmtime(os.path.join(get_backup_dir(), files[-1])) if files else 0
-                if time.time() - last >= hours * 3600:
+            section = read_config().get("backup", {}) or {}
+            if section.get("enabled", True):
+                hour, minute = parse_backup_time(section.get("time", "02:00"))
+                now = datetime.datetime.now()
+                target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                if now >= target and last_backup_date() != now.date():
                     create_backup()
         except Exception:
             pass
-        time.sleep(60)
+        time.sleep(30)
 
 
 def start_backup_scheduler():
@@ -740,6 +788,40 @@ def print_pdf_direct(pdf_path, printer="", copies=1):
 OFFICE_MISSING_MESSAGE = "未检测到 WPS 或 Office，请安装 WPS 或 Office 软件之后再尝试打印。"
 
 _office_state = None
+
+
+def apply_autostart(enabled):
+    """立即把开机自启写进/移出当前用户的启动项。返回 True 表示已生效。"""
+    if os.name != "nt":
+        return False
+
+    exe = os.environ.get("CLASSSCORE_DESKTOP_EXE")
+    root = os.environ.get("CLASSSCORE_ROOT")
+    if not exe or not os.path.exists(exe):
+        return False        # 网页版启动时拿不到桌面端路径，只能等下次启动同步
+
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                             r"Software\Microsoft\Windows\CurrentVersion\Run",
+                             0, winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE)
+        try:
+            if enabled:
+                command = f'"{exe}"'
+                if root:
+                    command += f' --root "{root}"'
+                command += " --tray"
+                winreg.SetValueEx(key, "ClassScoreDesktop", 0, winreg.REG_SZ, command)
+            else:
+                try:
+                    winreg.DeleteValue(key, "ClassScoreDesktop")
+                except FileNotFoundError:
+                    pass
+        finally:
+            winreg.CloseKey(key)
+        return True
+    except Exception:
+        return False
 
 
 def office_available():
@@ -1662,10 +1744,9 @@ async def setting(request: Request):
     notice = sess.pop("notice", None)
 
     backup_cfg = config.get("backup", {}) or {}
-    try:
-        interval_value = int(round(float(backup_cfg.get("interval_hours", 24) or 0)))
-    except (TypeError, ValueError):
-        interval_value = 24
+    backup_time = backup_cfg.get("time", "02:00") or "02:00"
+    if not re.fullmatch(r"\d{1,2}:\d{2}", backup_time):
+        backup_time = "02:00"
     printers, default_printer = list_printers()
     print_cfg = config.get("print", {}) or {}
     out_count, out_size = output_stats()
@@ -1681,7 +1762,9 @@ async def setting(request: Request):
         "backup_count": len(list_backups()),
         "last_backup": last_backup_time(),
         "backup_dir": get_backup_dir(),
-        "interval_hours": interval_value,
+        "backup_time": backup_time,
+        "backup_enabled": bool(backup_cfg.get("enabled", True)),
+        "next_backup": next_backup_time(),
         "backup_keep": backup_cfg.get("keep", 10),
         "autostart": bool((config.get("desktop") or {}).get("autostart", False)),
         "printers": printers,
@@ -1780,15 +1863,21 @@ async def backup_open(request: Request, csrf_token: str = Form(None)):
 
 
 @app.post("/backup/settings")
-async def backup_settings(request: Request, interval_hours: int = Form(24),
-                          keep: int = Form(10), csrf_token: str = Form(None)):
+async def backup_settings(request: Request, backup_time: str = Form("02:00"),
+                          keep: int = Form(10), enabled: str = Form(None),
+                          csrf_token: str = Form(None)):
     check_csrf(request, csrf_token)
     sid, sess = get_session(request)
     if not sess:
         return RedirectResponse(url="/login", status_code=303)
 
-    if interval_hours < 0 or interval_hours > MAX_BACKUP_HOURS:
-        sess["notice"] = {"kind": "error", "text": f"备份间隔需在 0 - {MAX_BACKUP_HOURS} 小时之间（0 表示关闭定时备份）"}
+    if not re.fullmatch(r"\d{1,2}:\d{2}", (backup_time or "").strip()):
+        sess["notice"] = {"kind": "error", "text": "备份时间格式应为 HH:MM，例如 02:30"}
+        return RedirectResponse(url="/setting", status_code=303)
+
+    hour, minute = parse_backup_time(backup_time)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        sess["notice"] = {"kind": "error", "text": "备份时间需在 00:00 - 23:59 之间"}
         return RedirectResponse(url="/setting", status_code=303)
     if not 1 <= keep <= MAX_BACKUP_KEEP:
         sess["notice"] = {"kind": "error", "text": f"保留份数需在 1 - {MAX_BACKUP_KEEP} 之间"}
@@ -1796,11 +1885,16 @@ async def backup_settings(request: Request, interval_hours: int = Form(24),
 
     config = read_config()
     config.setdefault("backup", {})
-    config["backup"]["interval_hours"] = interval_hours
+    config["backup"]["time"] = f"{hour:02d}:{minute:02d}"
     config["backup"]["keep"] = keep
+    config["backup"]["enabled"] = bool(enabled)
     write_config(config)
 
-    sess["notice"] = {"kind": "success", "text": "备份设置已保存"}
+    if enabled:
+        text = f"已开启每日 {hour:02d}:{minute:02d} 自动备份，最多保留 {keep} 份"
+    else:
+        text = "已关闭定时备份"
+    sess["notice"] = {"kind": "success", "text": text}
     return RedirectResponse(url="/setting", status_code=303)
 
 
@@ -1844,10 +1938,13 @@ async def desktop_autostart(request: Request, autostart: str = Form(None),
     config["desktop"]["autostart"] = enabled
     write_config(config)
 
-    sess["notice"] = {
-        "kind": "success",
-        "text": "已开启开机自启，下次启动桌面版时生效" if enabled else "已关闭开机自启",
-    }
+    applied = apply_autostart(enabled)
+    if enabled:
+        text = "已开启开机自启" if applied else "已开启开机自启，下次启动桌面版时生效"
+    else:
+        text = "已关闭开机自启" if applied else "已关闭开机自启，下次启动桌面版时生效"
+
+    sess["notice"] = {"kind": "success", "text": text}
     return RedirectResponse(url="/setting", status_code=303)
 
 
