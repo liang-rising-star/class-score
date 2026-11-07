@@ -354,7 +354,10 @@
             elMeta.hidden = true;
             if (notesWrap) notesWrap.hidden = true;
 
-            fetch('/update/download', { method: 'POST' })
+            var form = new URLSearchParams();
+            form.set('csrf_token', csrf);
+
+            fetch('/update/download', { method: 'POST', body: form })
                 .then(function (r) { return r.json(); })
                 .then(function (res) {
                     if (!res.ok) {

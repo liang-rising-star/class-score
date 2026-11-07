@@ -1522,8 +1522,9 @@ def update_check(request: Request):
 
 
 @app.post("/update/download")
-def update_download(request: Request):
+async def update_download(request: Request, csrf_token: str = Form(None)):
     """把 release 里的 update.zip 下到 class-score-system/update/ 下，返回本地路径。"""
+    check_csrf(request, csrf_token)
     sid, sess = get_session(request)
     if not sess:
         raise HTTPException(status_code=403, detail="请先登录")

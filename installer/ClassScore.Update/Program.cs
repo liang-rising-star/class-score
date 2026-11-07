@@ -170,38 +170,110 @@ internal static class Program
         return extractDir;
     }
 
+    /// <summary>等主程序和它的后端 python 都退出，等不到就强杀。</summary>
     private static void WaitForAppExit()
     {
         for (var i = 0; i < 120; i++)          // 最多等 60 秒
         {
-            var alive = false;
-            foreach (var proc in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(ExeName)))
-            {
-                try
-                {
-                    var path = proc.MainModule?.FileName;
-                    if (path is not null && IsInside(_dir, path)) { alive = true; break; }
-                }
-                catch { }
-            }
-
-            if (!alive) return;
+            if (!AnyAlive()) return;
             Thread.Sleep(500);
         }
 
-        // 等不到就强杀
-        foreach (var proc in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(ExeName)))
+        KillProcesses();
+    }
+
+    /// <summary>安装目录下还有没有主程序或后端 python 在跑。</summary>
+    private static bool AnyAlive()
+    {
+        if (FindProcesses(Program.ExeName).Count > 0) return true;
+        return FindProcesses("python.exe").Any(p => IsInside(_dir, p.Path));
+    }
+
+    private sealed record ProcInfo(int Id, string? Path);
+
+    private static List<ProcInfo> FindProcesses(string exeName)
+    {
+        var list = new List<ProcInfo>();
+        foreach (var proc in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exeName)))
+        {
+            try { list.Add(new ProcInfo(proc.Id, proc.MainModule?.FileName)); }
+            catch { list.Add(new ProcInfo(proc.Id, null)); }
+        }
+        return list;
+    }
+
+    /// <summary>强杀主程序与安装目录下的 python（MainModule 取不到时用 wmic 兜底）。</summary>
+    private static void KillProcesses()
+    {
+        // 主程序：进程名是我们独有的，直接全杀
+        foreach (var proc in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Program.ExeName)))
         {
             try
             {
-                var path = proc.MainModule?.FileName;
-                if (path is not null && IsInside(_dir, path))
-                {
-                    proc.Kill(entireProcessTree: true);
-                    proc.WaitForExit(4000);
-                }
+                proc.Kill(entireProcessTree: true);
+                proc.WaitForExit(3000);
             }
             catch { }
+        }
+
+        // 后端 python：先按可执行文件路径匹配
+        var killed = new HashSet<int>();
+        foreach (var info in FindProcesses("python.exe"))
+        {
+            if (info.Path is null || !IsInside(_dir, info.Path)) continue;
+            try
+            {
+                using var proc = Process.GetProcessById(info.Id);
+                proc.Kill(entireProcessTree: true);
+                proc.WaitForExit(2000);
+                killed.Add(info.Id);
+            }
+            catch { }
+        }
+
+        // 路径取不到（权限不足）时用 wmic 查命令行再补刀
+        try
+        {
+            var psi = new ProcessStartInfo("cmd.exe",
+                "/c wmic process where \"name='python.exe'\" get ProcessId,CommandLine /format:csv")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+            };
+
+            using var p = Process.Start(psi);
+            if (p is not null)
+            {
+                var output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(8000);
+
+                foreach (var line in output.Split((char)10))
+                {
+                    if (!line.Contains(_dir, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var parts = line.Trim().Split(',');
+                    if (parts.Length < 2) continue;
+                    if (!int.TryParse(parts[^1].Trim(), out var pid)) continue;
+                    if (pid == Environment.ProcessId || killed.Contains(pid)) continue;
+
+                    try
+                    {
+                        using var target = Process.GetProcessById(pid);
+                        target.Kill(entireProcessTree: true);
+                        target.WaitForExit(2000);
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+
+        // 等文件句柄释放，否则删旧目录会漏文件
+        for (var i = 0; i < 10; i++)
+        {
+            Thread.Sleep(300);
+            if (!AnyAlive()) break;
         }
     }
 
