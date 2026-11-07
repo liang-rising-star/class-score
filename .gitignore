@@ -7,6 +7,7 @@ venv/
 
 # 运行时数据：数据库、导出文件、含管理员口令的配置，禁止入库
 class-score-system/data/
+class-score-system/update/
 class-score-system/db/
 class-score-system/output/
 
