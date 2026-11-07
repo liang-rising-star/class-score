@@ -6,7 +6,12 @@
     <link rel="icon" href="/logo.ico" type="image/x-icon">
     <title>系统设置</title>
     <link rel="stylesheet" href="/static/css/app.css?v={{ css_version }}">
-    <script>window.SOUND_SETTINGS = { ok: "{{ sound_ok }}", fail: "{{ sound_fail }}" };</script>
+    <script>
+// Esc / 点遮罩都不关闭弹窗：必须点对应的按钮
+document.addEventListener('cancel', function (e) {
+    if (e.target && e.target.tagName === 'DIALOG') e.preventDefault();
+}, true);
+window.SOUND_SETTINGS = { ok: "{{ sound_ok }}", fail: "{{ sound_fail }}" };</script>
     <script src="/static/js/sound.js?v={{ css_version }}"></script>
 </head>
 <body>
@@ -486,11 +491,6 @@
         dialog.close();
     });
 
-    // 点遮罩空白处 = 取消
-    dialog.addEventListener('click', function(e) {
-        if (e.target === dialog) dialog.close();
-    });
-
     // 密码输错被服务端打回时，自动重新打开弹窗（保留错误提示）
     if (dialog.dataset.autoshow === '1') open(true);
 })();
@@ -529,7 +529,6 @@
     });
 
     document.getElementById('cleanCancel').addEventListener('click', function () { dlg.close(); });
-    dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
 })();
 
 </script>
@@ -893,10 +892,6 @@
 
     document.getElementById('passwordCancel').addEventListener('click', function() {
         dialog.close();
-    });
-
-    dialog.addEventListener('click', function(e) {
-        if (e.target === dialog) dialog.close();
     });
 
     // 两次新密码不一致时当场拦下

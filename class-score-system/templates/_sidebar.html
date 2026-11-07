@@ -102,6 +102,11 @@
 </dialog>
 
 <script>
+// Esc / 点遮罩都不关闭弹窗：必须点对应的按钮
+document.addEventListener('cancel', function (e) {
+    if (e.target && e.target.tagName === 'DIALOG') e.preventDefault();
+}, true);
+
 (function() {
     var KEY = 'class-score:sidebar-collapsed';
     var shell = document.querySelector('.app-shell');
@@ -139,11 +144,6 @@
         } else if (confirm('确定要退出登录吗？')) {
             location.href = link.getAttribute('href');
         }
-    });
-
-    // 点遮罩层空白处 = 取消（Esc 由 <dialog> 原生处理）
-    dialog.addEventListener('click', function(e) {
-        if (e.target === dialog) dialog.close('cancel');
     });
 
     // <form method="dialog"> 点按钮即关闭，returnValue 记录点的是哪个
@@ -440,7 +440,6 @@
         }
     }
     elClose.addEventListener('click', function() { dialog.close(); });
-    dialog.addEventListener('click', function(e) { if (e.target === dialog) dialog.close(); });
 
     // 切换体验通道：保存后立刻按新通道查一次
     elBeta.addEventListener('change', function() {

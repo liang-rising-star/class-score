@@ -130,6 +130,11 @@
     </dialog>
 
 <script>
+// Esc / 点遮罩都不关闭弹窗：必须点对应的按钮
+document.addEventListener('cancel', function (e) {
+    if (e.target && e.target.tagName === 'DIALOG') e.preventDefault();
+}, true);
+
 // 打印弹窗：先确认（取消/打印），确认后显示进度，结束显示关闭
 (function() {
     var dlg = document.getElementById('printDialog');

@@ -55,6 +55,11 @@
     </dialog>
 
 <script>
+// Esc / 点遮罩都不关闭弹窗：必须点对应的按钮
+document.addEventListener('cancel', function (e) {
+    if (e.target && e.target.tagName === 'DIALOG') e.preventDefault();
+}, true);
+
 // 待处理批次：只有「真正完成」才从列表移除
 //  - 保存：等桌面端通知下载写完盘（取消保存则保留）
 //  - 打印：等打印任务真正提交成功（失败/取消则保留）
@@ -161,7 +166,6 @@
 
     if (dlg) {
         document.getElementById('deleteCancel').addEventListener('click', closeDelete);
-        dlg.addEventListener('click', function(e) { if (e.target === dlg) closeDelete(); });
         dlgConfirm.addEventListener('click', function() {
             if (!pendingDelete) return;
             var job = pendingDelete;
