@@ -32,6 +32,15 @@ internal static class Program
     internal static Mutex? InstanceMutex;
     internal static EventWaitHandle? ShowWindowEvent;
 
+    /// <summary>按安装目录算一个短哈希，用于区分不同副本的单实例。</summary>
+    private static string InstanceKey()
+    {
+        var dir = (RootOverride ?? AppContext.BaseDirectory).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant();
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(dir));
+        return Convert.ToHexString(hash, 0, 4);
+    }
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -45,9 +54,11 @@ internal static class Program
             if (args[i] is "--root" or "-r") RootOverride = args[i + 1];
         }
 
-        // 单实例：已经有实例在跑，就把它叫到前台，本进程直接退出
-        InstanceMutex = new Mutex(initiallyOwned: true, @"Local\ClassScore.Desktop.SingleInstance", out var isFirstInstance);
-        ShowWindowEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\ClassScore.Desktop.ShowWindow");
+        // 单实例：同一个安装目录只允许跑一个；不同副本（比如打包版 vs 开发版）互不干扰。
+        // 名称里带上安装目录的哈希，避免"启动打包版却把开发版叫到前台"这种串台。
+        var instanceKey = InstanceKey();
+        InstanceMutex = new Mutex(initiallyOwned: true, $@"Local\class-score-{instanceKey}", out var isFirstInstance);
+        ShowWindowEvent = new EventWaitHandle(false, EventResetMode.AutoReset, $@"Local\class-score-show-{instanceKey}");
 
         if (!isFirstInstance)
         {
@@ -124,9 +135,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
         _server = new BackendServer(root);
-        var url = _server.Start();
 
-        _form = new MainForm(url, AppPaths.LoadIcon(root));
+        // 先把窗口和托盘准备好并显示（秒开），后端在后台起；
+        // 窗口里先放本地启动页，后端就绪后再切到真正的页面。
+        _form = new MainForm(null, AppPaths.LoadIcon(root));
         _form.FormClosing += OnFormClosing;
 
         _tray = new NotifyIcon
@@ -141,8 +153,38 @@ internal sealed class TrayApplicationContext : ApplicationContext
             if (e.Button == MouseButtons.Right) ShowTrayMenu(Cursor.Position);
         };
 
+        // 图标放在右下角 ^ 折叠区即可，不强行改用户的托盘设置；
+        // 只在驻留托盘（--tray，开机自启）时提示一次图标在哪。
+        if (startInTray)
+        {
+            _tray.BalloonTipTitle = "班级积分管理系统";
+            _tray.BalloonTipText = "程序已在后台运行，图标在右下角 ^ 折叠区里，双击即可打开主界面";
+            _tray.BalloonTipIcon = ToolTipIcon.Info;
+            _tray.ShowBalloonTip(4000);
+        }
+
         // 开机自启（--tray）时只驻留托盘，其余情况正常开窗
         if (!startInTray) ShowMainWindow();
+
+        // 后台拉起 Python 后端，就绪后把窗口切到真实页面
+        Task.Run(() =>
+        {
+            try
+            {
+                var url = _server.Start();
+                _uiContext.Post(_ => _form.NavigateTo(url), null);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("backend failed: " + ex.Message);
+                _uiContext.Post(_ =>
+                {
+                    MessageBox.Show(ex.Message, "班级积分管理系统",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    ExitThread();
+                }, null);
+            }
+        });
     }
 
     /// <summary>按 data/config.json 里的 desktop.autostart 增删开机启动项（当前用户 Run 键）。</summary>
@@ -528,7 +570,7 @@ internal sealed class MainForm : Form
     private readonly WebView2 _web;
     private string _url;
 
-    public MainForm(string url, Icon? icon)
+    public MainForm(string? url, Icon? icon)
     {
         _url = url;
 
@@ -537,6 +579,10 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(880, 600);
         BackColor = Color.White;
         if (icon is not null) Icon = icon;
+
+        // 先把窗口尺寸定好，再创建 WebView2：
+        // 否则 WebView2 会先用默认尺寸排版，启动页内容要等重排后才居中。
+        ApplyWindowSize();
 
         _web = new WebView2 { Dock = DockStyle.Fill };
         Controls.Add(_web);
@@ -623,7 +669,10 @@ internal sealed class MainForm : Form
     /// <summary>按屏幕工作区收缩并居中（全部用像素计算，避开 DIP 换算）。</summary>
     private void ApplyWindowSize()
     {
-        var area = Screen.FromControl(this).WorkingArea;
+        // 构造阶段窗口还没显示，Screen.FromControl 可能拿到另一块显示器，
+        // 导致窗口比主屏还宽、内容偏到右侧。未显示时以主屏为准。
+        var screen = Visible ? Screen.FromControl(this) : (Screen.PrimaryScreen ?? Screen.FromControl(this));
+        var area = screen.WorkingArea;
 
         var width = Math.Max(900, (int)(area.Width * 0.86));
         var height = Math.Max(620, (int)(area.Height * 0.86));
@@ -656,11 +705,71 @@ internal sealed class MainForm : Form
         if (_web.CoreWebView2 is not null) _web.Source = new Uri(url);
     }
 
+    /// <summary>程序旁边若有「固定版」WebView2 运行时，就用它，不再依赖系统安装。</summary>
+    internal static string? FindFixedWebViewRuntime()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "WebView2Fixed"),
+            Path.Combine(AppContext.BaseDirectory, "..", "WebView2Fixed"),
+        };
+
+        foreach (var dir in candidates)
+        {
+            var full = Path.GetFullPath(dir);
+            if (File.Exists(Path.Combine(full, "msedgewebview2.exe"))) return full;
+        }
+
+        return null;
+    }
+
     private async Task InitializeWebViewAsync()
     {
         try
         {
-            await _web.EnsureCoreWebView2Async(null);
+            var fixedRuntime = FindFixedWebViewRuntime();
+
+            if (fixedRuntime is null)
+            {
+                // 没有固定版运行时，检查系统是否装了
+                try
+                {
+                    var version = CoreWebView2Environment.GetAvailableBrowserVersionString();
+                    if (string.IsNullOrEmpty(version))
+                        throw new InvalidOperationException("未检测到 WebView2 运行时");
+                }
+                catch (Exception checkEx)
+                {
+                    var answer = MessageBox.Show(
+                        "本程序需要「Microsoft Edge WebView2 运行时」才能显示界面。\n\n" +
+                        "点「是」打开官方下载页，安装完成后重新打开本程序即可。\n" +
+                        "（Windows 10/11 通常自带；技术细节：" + checkEx.Message + "）",
+                        "班级积分管理系统", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+
+                    if (answer == DialogResult.Yes)
+                    {
+                        try
+                        {
+                            Process.Start(new ProcessStartInfo(
+                                "https://go.microsoft.com/fwlink/p/?LinkId=2124703")
+                            { UseShellExecute = true });
+                        }
+                        catch { }
+                    }
+
+                    return;
+                }
+
+                await _web.EnsureCoreWebView2Async(null);
+            }
+            else
+            {
+                var userData = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "class-score", "WebView2");
+                var env = await CoreWebView2Environment.CreateAsync(fixedRuntime, userData);
+                await _web.EnsureCoreWebView2Async(env);
+            }
 
             var settings = _web.CoreWebView2.Settings;
             settings.AreDevToolsEnabled = false;
@@ -691,7 +800,11 @@ internal sealed class MainForm : Form
                 AppLog.Write("host bridge failed: " + ex.Message);
             }
 
-            _web.Source = new Uri(_url);
+            if (string.IsNullOrEmpty(_url))
+                _web.NavigateToString(BuildSplashHtml());
+            else
+                _web.Source = new Uri(_url);
+
         }
         catch (Exception ex)
         {
@@ -700,6 +813,62 @@ internal sealed class MainForm : Form
                 "\n\n请确认已安装 Microsoft Edge WebView2 运行时。",
                 "班级积分管理系统", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    /// <summary>后端还没起来时显示的启动页：品牌动画 + 「正在启动服务」。</summary>
+    private static string BuildSplashHtml()
+    {
+        var logo = string.Empty;
+        try
+        {
+            var root = Program.RootPath;
+            string[] candidates =
+            {
+                Path.Combine(root, "logo.ico"),
+                Path.Combine(root, "class-score-system", "logo.ico"),
+            };
+
+            foreach (var path in candidates)
+            {
+                if (!File.Exists(path)) continue;
+                logo = "data:image/x-icon;base64," + Convert.ToBase64String(File.ReadAllBytes(path));
+                break;
+            }
+        }
+        catch { }
+
+        var logoTag = string.IsNullOrEmpty(logo)
+            ? "<div class='mark'></div>"
+            : $"<img class='logo' src='{logo}' alt=''>";
+
+        return @"<!DOCTYPE html><html><head><meta charset='utf-8'>
+<style>
+  html,body{height:100%;margin:0;background:#fff;font-family:'Microsoft YaHei UI',system-ui,sans-serif;
+            overflow:hidden;-webkit-user-select:none;user-select:none}
+  .wrap{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .ring{position:relative;width:132px;height:132px;display:grid;place-items:center}
+  .ring i{position:absolute;inset:0;border:1px solid rgba(37,99,235,.25);border-radius:50%;
+          animation:out 2.6s ease-out infinite}
+  .ring i:nth-child(2){animation-delay:1.3s}
+  @keyframes out{0%{transform:scale(.7);opacity:0}25%{opacity:.8}100%{transform:scale(1.35);opacity:0}}
+  .logo,.mark{width:92px;height:92px;border-radius:50%;animation:pop .8s cubic-bezier(.2,.9,.25,1.15) both}
+  .mark{background:linear-gradient(135deg,#2563eb,#06b6d4)}
+  @keyframes pop{0%{transform:scale(.55);opacity:0}60%{transform:scale(1.06);opacity:1}100%{transform:scale(1)}}
+  h1{margin:22px 0 0;font-size:22px;font-weight:700;color:#0f172a;letter-spacing:.06em;
+     animation:fade .6s ease .2s both}
+  .sub{margin-top:10px;font-size:13px;color:#94a3b8;animation:fade .6s ease .35s both}
+  .bar{margin-top:26px;width:180px;height:4px;border-radius:999px;background:#eef2f7;overflow:hidden;
+       animation:fade .6s ease .45s both}
+  .bar::after{content:'';display:block;height:100%;width:42%;border-radius:999px;
+              background:linear-gradient(90deg,#2563eb,#06b6d4);animation:slide 1.15s ease-in-out infinite}
+  @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(240%)}}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+</style></head><body><div class='wrap'>
+  <div class='ring'><i></i><i></i>" + logoTag + @"</div>
+  <h1>班级积分管理系统</h1>
+  <div class='sub'>正在启动服务…</div>
+  <div class='bar'></div>
+</div></body></html>";
     }
 
     public void Reload() => _web.CoreWebView2?.Reload();
@@ -821,6 +990,97 @@ public class DesktopBridge
     private readonly Form _owner;
 
     public DesktopBridge(Form owner) => _owner = owner;
+
+    /// <summary>弹文件选择框，让用户挑一个本地更新包（zip）。取消返回空串。</summary>
+    public string PickUpdateZip()
+    {
+        try
+        {
+            using var dialog = new OpenFileDialog
+            {
+                Title = "选择更新包",
+                Filter = "更新包 (*.zip)|*.zip|所有文件 (*.*)|*.*",
+                CheckFileExists = true,
+            };
+
+            return dialog.ShowDialog(_owner) == DialogResult.OK ? dialog.FileName : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// 导入本地更新包：复制到 class-score-system/update/update.zip（与自动下载同一位置），再交给 update.exe。
+    /// 返回 "ok" 或 "failed:原因"。
+    /// </summary>
+    public string ImportUpdate(string sourceZip)
+    {
+        try
+        {
+            var root = Program.RootPath;
+            if (string.IsNullOrEmpty(root)) return "failed: 未找到安装目录";
+            if (string.IsNullOrWhiteSpace(sourceZip) || !File.Exists(sourceZip))
+                return "failed: 没有选择更新包";
+
+            var updateDir = Path.Combine(root, "class-score-system", "update");
+            Directory.CreateDirectory(updateDir);
+            var target = Path.Combine(updateDir, "update.zip");
+
+            if (!string.Equals(Path.GetFullPath(sourceZip), Path.GetFullPath(target),
+                               StringComparison.OrdinalIgnoreCase))
+            {
+                File.Copy(sourceZip, target, overwrite: true);
+            }
+
+            return ApplyUpdate(target);
+        }
+        catch (Exception ex)
+        {
+            return "failed: " + ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// 应用更新：把 update.zip 交给 update.exe，然后退出本程序。
+    /// 返回 "ok" 或 "failed:原因"。
+    /// </summary>
+    public string ApplyUpdate(string zipPath)
+    {
+        try
+        {
+            var root = Program.RootPath;
+            if (string.IsNullOrEmpty(root)) return "failed: 未找到安装目录";
+
+            var zipFull = string.IsNullOrWhiteSpace(zipPath) ? string.Empty : Path.GetFullPath(zipPath);
+            if (string.IsNullOrEmpty(zipFull) || !File.Exists(zipFull))
+                return "failed: 更新包不存在";
+
+            var updater = Path.Combine(root, "update.exe");
+            if (!File.Exists(updater)) return "failed: 缺少 update.exe";
+
+            Process.Start(new ProcessStartInfo(updater)
+            {
+                UseShellExecute = false,
+                WorkingDirectory = root,
+                Arguments = $"--dir \"{root}\" --zip \"{zipFull}\" --restart",
+            });
+
+            // 交给更新程序之后就退出，让它能替换文件
+            _owner.BeginInvoke(new Action(() =>
+            {
+                AppLog.Write("apply update: 启动 update.exe，主程序退出");
+                Application.Exit();
+            }));
+
+            return "ok";
+        }
+        catch (Exception ex)
+        {
+            return "failed: " + ex.Message;
+        }
+    }
 
     /// <summary>调用系统关联程序打印 output 目录下的 PDF；返回 queued 或 failed:原因。</summary>
     public string PrintPdf(string pdfFileName, string printerName)

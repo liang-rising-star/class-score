@@ -1393,7 +1393,232 @@ def mark_boot_shown():
     write_config(config)
 
 
-# 启动动画：初始化完成后进入控制台前的过场
+# ---------------- 检查更新 ----------------
+
+UPDATE_REPO = "liang-rising-star/class-score"
+UPDATE_LATEST_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
+UPDATE_LIST_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases?per_page=10"
+UPDATE_PAGE = f"https://github.com/{UPDATE_REPO}/releases"
+
+
+def _version_tuple(text):
+    """把 "v3.1.0" / "3.1" 转成等长元组，3.0 与 3.0.0 视为同一版本。"""
+    numbers = [int(n) for n in re.findall(r"\d+", str(text or ""))][:4]
+    return tuple(numbers + [0] * (4 - len(numbers))) if numbers else (0, 0, 0, 0)
+
+
+def _github_get(url):
+    import urllib.request as _url
+    req = _url.Request(url, headers={
+        "User-Agent": f"class-score/{APP_VERSION}",
+        "Accept": "application/vnd.github+json",
+    })
+    with _url.urlopen(req, timeout=8) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _pick_release(beta):
+    """正式通道取 latest；体验通道取列表里最新的（含 prerelease）。"""
+    if not beta:
+        return _github_get(UPDATE_LATEST_API)
+
+    items = _github_get(UPDATE_LIST_API)
+    if not isinstance(items, list) or not items:
+        raise ValueError("no releases")
+    # 列表本身就是按发布时间倒序，取第一个非草稿
+    for item in items:
+        if not item.get("draft"):
+            return item
+    raise ValueError("no releases")
+
+
+def update_fetch(beta=None):
+    """请求 GitHub，返回 {current, latest, has_update, ...}；不写配置。"""
+    config = read_config()
+    if beta is None:
+        beta = bool((config.get("update", {}) or {}).get("beta", False))
+
+    result = {
+        "current": APP_VERSION,
+        "beta": bool(beta),
+        "channel": "beta" if beta else "stable",
+        "latest": None,
+        "has_update": False,
+        "prerelease": False,
+        "url": UPDATE_PAGE,
+        "name": None,
+        "published": None,
+        "notes": None,
+        "error": None,
+    }
+
+    try:
+        data = _pick_release(beta)
+        latest = (data.get("tag_name") or data.get("name") or "").strip().lstrip("vV")
+        result.update({
+            "latest": latest,
+            "url": data.get("html_url") or UPDATE_PAGE,
+            "name": data.get("name") or latest,
+            "prerelease": bool(data.get("prerelease")),
+            "published": (data.get("published_at") or "")[:10],
+            "notes": (data.get("body") or "").strip()[:1200],
+        })
+        result["has_update"] = _version_tuple(latest) > _version_tuple(APP_VERSION)
+    except Exception as exc:
+        result["error"] = f"连不上更新服务器（{exc.__class__.__name__}）"
+
+    return result
+
+
+def update_cache(payload):
+    """把检查结果写进 config.json，供前台轮询。"""
+    config = read_config()
+    config.setdefault("update", {})
+    config["update"].update({
+        "latest": payload.get("latest") or "",
+        "has_update": bool(payload.get("has_update")),
+        "prerelease": bool(payload.get("prerelease")),
+        "name": payload.get("name") or "",
+        "url": payload.get("url") or UPDATE_PAGE,
+        "published": payload.get("published") or "",
+        "notes": payload.get("notes") or "",
+        "checked_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    write_config(config)
+
+
+@app.get("/update/check")
+def update_check(request: Request):
+    """手动检查：真的去请求 GitHub，并刷新缓存。"""
+    sid, sess = get_session(request)
+    if not sess:
+        raise HTTPException(status_code=403, detail="请先登录")
+
+    payload = update_fetch()
+    if not payload.get("error"):
+        update_cache(payload)
+    return payload
+
+
+@app.post("/update/download")
+def update_download(request: Request):
+    """把 release 里的 update.zip 下到 class-score-system/update/ 下，返回本地路径。"""
+    sid, sess = get_session(request)
+    if not sess:
+        raise HTTPException(status_code=403, detail="请先登录")
+
+    config = read_config()
+    beta = bool((config.get("update", {}) or {}).get("beta", False))
+
+    try:
+        data = _pick_release(beta)
+    except Exception as exc:
+        return {"ok": False, "error": f"读取发布信息失败（{exc.__class__.__name__}）"}
+
+    # 只要文件名里带 update、并且是 zip，就算更新包（允许带版本号，如 update-3.1.0.zip）
+    assets = data.get("assets") or []
+    asset = None
+    for item in assets:
+        name = (item.get("name") or "").lower()
+        if name.endswith(".zip") and "update" in name:
+            asset = item
+            break
+
+    if asset is None:
+        return {"ok": False, "error": "这个版本没有提供更新包（文件名需包含 update 且以 .zip 结尾）"}
+
+    url = asset.get("browser_download_url")
+    if not url:
+        return {"ok": False, "error": "更新包地址无效"}
+
+    target_dir = os.path.join(BASE_DIR, "update")
+    os.makedirs(target_dir, exist_ok=True)
+    target_name = os.path.basename(asset.get("name") or "update.zip")
+    target = os.path.join(target_dir, "update.zip")
+    result_name = target_name
+
+    try:
+        import urllib.request as _url
+        req = _url.Request(url, headers={"User-Agent": f"class-score/{APP_VERSION}"})
+        with _url.urlopen(req, timeout=60) as resp, open(target, "wb") as f:
+            while True:
+                chunk = resp.read(256 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+    except Exception as exc:
+        return {"ok": False, "error": f"下载失败（{exc.__class__.__name__}）"}
+
+    size = os.path.getsize(target)
+    return {"ok": True, "path": target, "size": size, "asset": result_name,
+            "version": (data.get("tag_name") or "").lstrip("vV")}
+
+
+@app.get("/update/status")
+def update_status(request: Request):
+    """只读缓存，前台用来显示「有新版本」徽标，不发网络请求。"""
+    sid, sess = get_session(request)
+    if not sess:
+        raise HTTPException(status_code=403, detail="请先登录")
+
+    config = read_config()
+    upd = config.get("update", {}) or {}
+    return {
+        "current": APP_VERSION,
+        "beta": bool(upd.get("beta", False)),
+        "latest": upd.get("latest") or "",
+        "has_update": bool(upd.get("has_update")),
+        "prerelease": bool(upd.get("prerelease")),
+        "name": upd.get("name") or "",
+        "url": upd.get("url") or UPDATE_PAGE,
+        "published": upd.get("published") or "",
+        "notes": upd.get("notes") or "",
+        "checked_at": upd.get("checked_at") or "",
+    }
+
+
+@app.post("/update/settings")
+async def update_settings(request: Request, beta: str = Form(None), csrf_token: str = Form(None)):
+    """切换正式 / 体验通道，切换后立刻查一次。"""
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        return RedirectResponse(url="/login", status_code=303)
+
+    enabled = bool(beta)
+    config = read_config()
+    config.setdefault("update", {})
+    config["update"]["beta"] = enabled
+    write_config(config)
+
+    payload = update_fetch(beta=enabled)
+    if not payload.get("error"):
+        update_cache(payload)
+
+    return {"ok": True, "beta": enabled, "channel": payload.get("channel"),
+            "result": payload}
+
+
+def _update_loop():
+    """后台线程：每小时检查一次更新，结果写缓存。"""
+    # 启动后先等 3 分钟再查，避免跟首次启动抢资源
+    time.sleep(180)
+    while True:
+        try:
+            payload = update_fetch()
+            if not payload.get("error"):
+                update_cache(payload)
+        except Exception:
+            pass
+        time.sleep(3600)
+
+
+def start_update_scheduler():
+    thread = threading.Thread(target=_update_loop, daemon=True, name="update-scheduler")
+    thread.start()
+
+
+# 启动动画：初始化完成后进入控制台前的过场# 启动动画：初始化完成后进入控制台前的过场
 @app.get("/boot", response_class=HTMLResponse)
 async def boot_page(request: Request, to: str = "/index"):
     sid, sess = get_session(request)
@@ -2476,3 +2701,6 @@ init_db()
 
 # 启动定时备份（按 data/config.json 里的 backup.interval_hours）
 start_backup_scheduler()
+
+# 启动更新检查（每小时一次，结果写进 data/config.json 缓存）
+start_update_scheduler()

@@ -1,0 +1,95 @@
+﻿# 生成自建安装包：把 dist\class-score 打成载荷，编进 setup.exe
+#
+# 用法（项目根目录）：
+#   powershell -ExecutionPolicy Bypass -File build\make-setup.ps1
+#
+# 产物：dist\class-score-setup.exe
+
+param(
+    [switch]$SkipPackage,
+    [string]$Configuration = "Release"
+)
+
+$ErrorActionPreference = "Stop"
+
+$root = Split-Path -Parent $PSScriptRoot
+$dist = Join-Path $root "dist"
+$appDir = Join-Path $dist "class-score"
+$setupDir = Join-Path $root "installer\ClassScore.Setup"
+$payload = Join-Path $setupDir "payload.zip"
+
+Write-Host "== 1/3 准备应用目录 ==" -ForegroundColor Cyan
+if (-not $SkipPackage -or -not (Test-Path (Join-Path $appDir "class-score.exe"))) {
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "package.ps1") -SkipZip
+    if ($LASTEXITCODE -ne 0) { throw "打包失败" }
+} else {
+    Write-Host "   复用已有 dist\class-score" -ForegroundColor DarkGray
+}
+
+Write-Host "== 1.5/3 编译独立卸载程序 ==" -ForegroundColor Cyan
+$uninstallProj = Join-Path $root "installer\ClassScore.Uninstall"
+$uninstallOut = Join-Path $dist "uninstall-out"
+if (Test-Path $uninstallOut) { Remove-Item $uninstallOut -Recurse -Force -ErrorAction SilentlyContinue }
+dotnet publish (Join-Path $uninstallProj "ClassScore.Uninstall.csproj") -c Release -r win-x64 -o $uninstallOut --nologo | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "卸载程序编译失败" }
+
+# 卸载程序现在是单文件 exe（自带 .NET 运行时与界面资源），直接放安装根目录
+$uninstallDir = Join-Path $appDir "uninstall"
+if (Test-Path $uninstallDir) { Remove-Item $uninstallDir -Recurse -Force -ErrorAction SilentlyContinue }
+Copy-Item (Join-Path $uninstallOut "uninstall.exe") (Join-Path $appDir "uninstall.exe") -Force
+Remove-Item $uninstallOut -Recurse -Force -ErrorAction SilentlyContinue
+$um = [math]::Round((Get-Item (Join-Path $appDir "uninstall.exe")).Length / 1MB, 1)
+Write-Host "   卸载程序：uninstall.exe（$um MB，单文件）" -ForegroundColor Green
+
+Write-Host "== 1.6/3 编译更新程序 ==" -ForegroundColor Cyan
+$updProj = Join-Path $root "installer\ClassScore.Update"
+$updOut = Join-Path $dist "update-out"
+if (Test-Path $updOut) { Remove-Item $updOut -Recurse -Force -ErrorAction SilentlyContinue }
+dotnet publish (Join-Path $updProj "ClassScore.Update.csproj") -c Release -r win-x64 -o $updOut --nologo | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "更新程序编译失败" }
+
+Copy-Item (Join-Path $updOut "update.exe") (Join-Path $appDir "update.exe") -Force
+Remove-Item $updOut -Recurse -Force -ErrorAction SilentlyContinue
+$up = [math]::Round((Get-Item (Join-Path $appDir "update.exe")).Length / 1MB, 1)
+Write-Host "   更新程序：update.exe（$up MB，单文件）" -ForegroundColor Green
+
+Write-Host "== 2/3 生成载荷 payload.zip ==" -ForegroundColor Cyan
+if (Test-Path $payload) { Remove-Item $payload -Force }
+Compress-Archive -Path (Join-Path $appDir "*") -DestinationPath $payload -CompressionLevel Optimal
+$mb = [math]::Round((Get-Item $payload).Length / 1MB, 1)
+Write-Host "   载荷大小：$mb MB" -ForegroundColor Green
+
+Write-Host "== 3/3 编译安装程序 ==" -ForegroundColor Cyan
+Push-Location $setupDir
+try {
+    dotnet publish ClassScore.Setup.csproj -c $Configuration -r win-x64 -o (Join-Path $dist "class-score-setup") | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "安装程序编译失败" }
+} finally {
+    Pop-Location
+}
+
+$outDir = Join-Path $dist "class-score-setup"
+$produced = Join-Path $outDir "class-score-setup.exe"
+if (-not (Test-Path $produced)) { throw "没有生成 class-score-setup.exe" }
+
+Remove-Item $payload -Force -ErrorAction SilentlyContinue
+
+$setupExe = $produced
+$sizeMb = [math]::Round((Get-Item $setupExe).Length / 1MB, 1)
+
+# 受控/沙箱环境写出来的文件会带 Low 完整性标签，双击没反应。
+# 检测到就自动复制一份到桌面（复制后归一化 ACL），并提示从那里运行。
+$label = (& icacls $setupExe 2>$null) -join " "
+if ($label -match "Low Mandatory") {
+    $desktopDir = Join-Path ([Environment]::GetFolderPath("Desktop")) "class-score-setup"
+    if (Test-Path $desktopDir) { Remove-Item $desktopDir -Recurse -Force }
+    Copy-Item $outDir $desktopDir -Recurse -Force
+    $desktopCopy = Join-Path $desktopDir "class-score-setup.exe"
+    Write-Host ""
+    Write-Host "!! 产物带 Low 完整性标签（本环境特有），双击无反应。" -ForegroundColor Yellow
+    Write-Host "   已自动复制一份到桌面，请从以下路径运行：" -ForegroundColor Yellow
+    Write-Host "   $desktopCopy" -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host "完成：$outDir\class-score-setup.exe（$sizeMb MB，需整目录一起分发）" -ForegroundColor Green

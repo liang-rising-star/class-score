@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>class-score-setup</AssemblyName>
+    <RootNamespace>ClassScore.Setup</RootNamespace>
+    <ApplicationIcon>..\..\logo.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AssemblyTitle>班级积分管理系统 安装程序</AssemblyTitle>
+    <Product>班级积分管理系统</Product>
+    <Company>liang-rising-star</Company>
+    <Version>3.0.0</Version>
+    <AssemblyVersion>3.0.0.0</AssemblyVersion>
+    <FileVersion>3.0.0.0</FileVersion>
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+
+    <!-- 自包含：目标机器不需要装 .NET；不用单文件，因为要带 wwwroot 目录 -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 向导界面：随输出目录一起带走 -->
+    <None Include="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="wwwroot" />
+    <None Include="..\..\logo.ico" CopyToOutputDirectory="PreserveNewest" Link="logo.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 安装包载荷：打包脚本会把 dist\class-score 压成 payload.zip 放进来 -->
+    <EmbeddedResource Include="payload.zip" Condition="Exists('payload.zip')">
+      <LogicalName>payload.zip</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

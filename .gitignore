@@ -16,9 +16,11 @@ class-score-system/output/
 # 临时重新纳入版本管理请用 `git add -f class-score-system/python`。
 class-score-system/python/
 
-# 打包/构建产物
-build/
+# 打包/构建产物（build/ 里是脚本，保留入库；只忽略产物目录）
 dist/
+installer/*/bin/
+installer/*/obj/
+installer/ClassScore.Setup/payload.zip
 *.spec
 desktop/bin/
 desktop/obj/

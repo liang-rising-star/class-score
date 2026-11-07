@@ -45,7 +45,6 @@
                     <input type="checkbox" name="autostart" {% if autostart %}checked{% endif %}>
                     <span class="switch__track" aria-hidden="true"></span>
                 </label>
-                <p class="field-hint">勾选后，下次启动桌面版会把本程序登记到当前用户的启动项</p>
             </form>
 
             <form action="/boot/settings" method="post" class="card-block" data-autosave="1">
@@ -57,9 +56,6 @@
                         <option value="{{ key }}" {% if boot_mode == key %}selected{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
-                    <div class="field-hint">
-                        登录成功后播放的过场动画：每次登录都播、每天只播第一次、或直接关掉
-                    </div>
                 </div>
             </form>
         </div>
@@ -90,7 +86,7 @@
                     </select>
                     <div class="field-hint">
                         {% if printers %}
-                        共发现 {{ printers|length }} 台打印机；选「系统默认打印机」时会跟随 Windows 设置变化
+                        选「系统默认打印机」时会跟随 Windows 设置变化
                         {% else %}
                         未检测到打印机，请先在系统中添加
                         {% endif %}
@@ -134,10 +130,6 @@
                     </div>
                 </div>
 
-                <div class="field-hint" style="margin-top:-2px">
-                    选「自定义音频…」可导入自己的音频文件（≤400KB），文件保存在本机浏览器，不随配置同步；
-                    预设音效由程序实时合成，不占空间
-                </div>
             </form>
         </div>
 
@@ -210,7 +202,6 @@
                             <label for="keep">最多保留份数</label>
                             <input type="number" id="keep" name="keep" min="1" max="200" step="1"
                                    value="{{ backup_keep }}" required>
-                            <div class="field-hint">超出后自动删除最旧的一份</div>
                         </div>
                     </div>
 

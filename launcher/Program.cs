@@ -1,18 +1,27 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace ClassScore.Launcher;
 
 /// <summary>
-/// 安装目录根部的启动器：
+/// 安装目录根部的启动器（原生 AOT 编译，单文件、无运行时依赖）：
 ///   class-score\
 ///     class-score.exe          ← 本程序，双击即启动
 ///     desktop\                 ← 桌面程序本体与 .NET 依赖
 ///     class-score-system\      ← 后端（Python 运行时、模板、数据）
-/// 只负责把 desktop 里的主程序拉起来，然后自己退出，
-/// 这样任务管理器里看到的仍然是 class-score（主程序同一进程名）。
+/// 只负责拉起 desktop 里的主程序，然后自己退出，
+/// 这样任务管理器里看到的仍是主程序 class-score。
 /// </summary>
 internal static class Program
 {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
+    private const uint MB_ICONERROR = 0x00000010;
+
+    private static void Error(string text) =>
+        MessageBoxW(IntPtr.Zero, text, "class-score", MB_ICONERROR);
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -21,10 +30,8 @@ internal static class Program
 
         if (!File.Exists(core))
         {
-            MessageBox.Show(
-                "找不到主程序：\n" + core +
-                "\n\n请确认 desktop 文件夹没有丢失或被杀毒软件隔离。",
-                "class-score", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Error("找不到主程序：\n" + core +
+                  "\n\n请确认 desktop 文件夹没有丢失或被杀毒软件隔离。");
             return 1;
         }
 
@@ -34,23 +41,22 @@ internal static class Program
             WorkingDirectory = Path.Combine(baseDir, "desktop")
         };
 
-        // 把安装目录作为根目录传给主程序，避免它向上乱找
-        var forwarded = new List<string>();
-        for (var i = 0; i < args.Length; i++)
+        // 默认把安装目录当根目录传下去；用户显式给了 --root 就保持原样
+        var hasRoot = false;
+        foreach (var a in args)
         {
-            forwarded.Add(args[i]);
-            if (args[i] is "--root" or "-r") i++;      // 用户已显式指定，保留原值
+            if (a is "--root" or "-r") { hasRoot = true; break; }
         }
 
-        if (!forwarded.Contains("--root") && !forwarded.Contains("-r"))
+        if (!hasRoot)
         {
-            forwarded.Insert(0, "--root");
-            forwarded.Insert(1, baseDir);
+            startInfo.ArgumentList.Add("--root");
+            startInfo.ArgumentList.Add(baseDir);
         }
 
-        foreach (var arg in forwarded)
+        foreach (var a in args)
         {
-            startInfo.ArgumentList.Add(arg);
+            startInfo.ArgumentList.Add(a);
         }
 
         try
@@ -60,8 +66,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            MessageBox.Show("启动失败：" + ex.Message, "class-score",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            Error("启动失败：" + ex.Message);
             return 1;
         }
     }

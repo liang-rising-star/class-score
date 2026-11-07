@@ -467,6 +467,186 @@ img,
     border-color: #f59e0b;
 }
 
+/* 侧边栏「检查更新」徽标 + 更新弹窗 */
+/* 有新版本时的菜单项：高亮强调 */
+button.side-link.is-new {
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+    font-weight: 600;
+}
+
+button.side-link.is-new svg {
+    color: var(--primary);
+}
+
+button.side-link.is-new:hover {
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+}
+
+.side-link__badge {
+    margin-left: auto;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    background: #ef4444;
+    border-radius: 999px;
+}
+
+/* 更新弹窗比默认弹窗宽一些，底部按钮不会挤在一起 */
+.modal.modal--update {
+    width: min(620px, calc(100vw - 32px));
+}
+
+.update-versions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.update-version {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.update-version.is-latest {
+    background: var(--primary-soft);
+    border-color: rgba(37, 99, 235, .3);
+}
+
+.update-version__label {
+    font-size: 11.5px;
+    color: var(--text-muted);
+}
+
+.update-version__value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-strong);
+    font-variant-numeric: tabular-nums;
+}
+
+.update-version.is-latest .update-version__value {
+    color: var(--primary-dark);
+}
+
+.update-version__arrow {
+    flex: 0 0 auto;
+    color: var(--text-faint);
+    font-size: 15px;
+}
+
+.update-status {
+    margin: 0 0 14px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+/* 更新弹窗里的开关：复用 .switch，只把间距压紧一点 */
+/* 底部按钮：左右分组、留足间距 */
+.modal.modal--update .modal__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
+.update-actions__gap {
+    flex: 1 1 auto;
+}
+
+.modal.modal--update .modal__actions .btn {
+    flex: 0 0 auto;
+    height: 38px;
+    padding: 0 18px;
+    font-size: 13.5px;
+    white-space: nowrap;
+}
+
+.btn--new {
+    background: var(--primary);
+    color: #fff;
+    font-weight: 600;
+    box-shadow: 0 6px 18px rgba(37, 99, 235, .28);
+    animation: btnBreathe 1.8s ease-in-out infinite;
+}
+
+.btn--new:hover { background: var(--primary-dark); }
+
+@keyframes btnBreathe {
+    0%, 100% { box-shadow: 0 6px 18px rgba(37, 99, 235, .24); }
+    50%      { box-shadow: 0 8px 24px rgba(37, 99, 235, .45); }
+}
+
+.update-switch {
+    margin-bottom: 14px;
+    padding: 12px 14px;
+}
+
+.update-switch .switch__text {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-strong);
+}
+
+.update-switch .switch__hint {
+    margin-top: 2px;
+    font-weight: 400;
+    line-height: 1.5;
+}
+
+.update-body {
+    margin-bottom: 18px;
+}
+
+.update-meta {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin: 0 0 14px;
+}
+
+.update-notes-wrap {
+    margin: 4px 0 0;
+    padding: 14px 16px;
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.update-notes__title {
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.update-notes {
+    max-height: 168px;
+    overflow-y: auto;
+    margin: 0;
+    margin: 0;
+    padding: 0;
+    font-family: inherit;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--text);
+    background: transparent;
+    border: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 /* 自动保存提示条 */
 .save-toast {
     position: fixed;
@@ -1116,6 +1296,25 @@ body::-webkit-scrollbar {
 }
 
 .side-link svg { flex: 0 0 auto; }
+
+/* 侧边栏里的按钮要抹掉浏览器默认样式，跟 <a> 版完全一致 */
+button.side-link {
+    width: 100%;
+    margin: 0;
+    font-family: inherit;
+    line-height: 1.6;          /* 与 <a> 版一致，否则高度差 3px */
+    text-align: left;
+    text-decoration: none;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    appearance: none;
+}
+
+button.side-link:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
 
 .side-link:hover {
     background: var(--surface-soft);
