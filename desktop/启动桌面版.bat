@@ -10,7 +10,7 @@ set "SRC=%~dp0bin\Release\net8.0-windows"
 set "DST=%LOCALAPPDATA%\ClassScore-Desktop\app"
 set "ROOT=%~dp0.."
 
-if not exist "%SRC%\ClassScore.Desktop.exe" (
+if not exist "%SRC%\class-score.exe" (
     echo 未找到已构建的程序，请先在 desktop 目录执行：dotnet build -c Release
     pause
     exit /b 1
@@ -25,5 +25,5 @@ if errorlevel 8 (
     exit /b 1
 )
 
-start "" "%DST%\ClassScore.Desktop.exe" --root "%ROOT%"
+start "" "%DST%\class-score.exe" --root "%ROOT%"
 endlocal

@@ -108,7 +108,7 @@ dotnet build -c Release
   - 「重启系统」是整体重启：托盘图标和窗口先消失，随后自动启动新进程（后端也一起重启），
     适合改了配置或代码后重新加载；重启后需要重新登录
 - 程序会从自身目录向上查找 `class-score-system\python\python.exe` 来定位项目根目录；
-  也可以显式指定：`ClassScore.Desktop.exe --root "D:\class-score"`，或设环境变量 `CLASS_SCORE_ROOT`
+  也可以显式指定：`class-score.exe --root "D:\class-score"`，或设环境变量 `CLASS_SCORE_ROOT`
 - 导出文件走系统「另存为」对话框，自己选保存位置
 - 运行时日志：`%LOCALAPPDATA%\ClassScore-Desktop\desktop.log`（后端启动失败时会写明原因）
 

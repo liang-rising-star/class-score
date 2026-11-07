@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>class-score</AssemblyName>
+    <RootNamespace>ClassScore.Launcher</RootNamespace>
+    <ApplicationIcon>..\logo.ico</ApplicationIcon>
+    <AssemblyTitle>class-score</AssemblyTitle>
+    <Product>class-score</Product>
+    <Company>liang-rising-star</Company>
+    <Version>3.0.0</Version>
+    <AssemblyVersion>3.0.0.0</AssemblyVersion>
+    <FileVersion>3.0.0.0</FileVersion>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+</Project>

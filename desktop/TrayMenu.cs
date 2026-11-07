@@ -60,8 +60,20 @@ internal sealed class TrayMenu : Form
         };
         row.Clicked += () =>
         {
-            onClick();
+            // 必须先关掉菜单再执行动作：重启/退出会阻塞 UI 线程，
+            // 若先跑动作，菜单窗口会一直卡在屏幕上（关不掉也重绘不了）。
+            Hide();
             Close();
+            Application.DoEvents();      // 把关闭消息处理掉，菜单立刻从屏幕消失
+
+            try
+            {
+                onClick();
+            }
+            catch
+            {
+                // 动作本身已有日志，这里避免未捕获异常打断消息循环
+            }
         };
         _rows.Add(row);
     }

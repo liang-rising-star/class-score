@@ -131,7 +131,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _tray = new NotifyIcon
         {
-            Icon = AppPaths.LoadIcon(root),
+            Icon = AppPaths.LoadIcon(root, SystemInformation.SmallIconSize),
             Text = "班级积分管理系统",
             Visible = true
         };
@@ -149,7 +149,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private static void ApplyAutostart(string root)
     {
         const string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        const string valueName = "ClassScoreDesktop";
+        const string valueName = "class-score";
 
         try
         {
@@ -1106,18 +1106,26 @@ internal static class AppPaths
     private static bool HasRuntime(string root) =>
         File.Exists(Path.Combine(root, "class-score-system", "python", "python.exe"));
 
-    public static Icon? LoadIcon(string root)
+    /// <summary>
+    /// 读取图标。size 为空时取系统默认帧；指定尺寸能拿到 ico 里对应分辨率的那一帧，
+    /// 避免高分屏下被拉伸模糊（ico 内含 16/20/24/32/40/48/64/96/128/256 各档）。
+    /// </summary>
+    public static Icon? LoadIcon(string root, Size? size = null)
     {
         var candidates = new[]
         {
+            Path.Combine(AppContext.BaseDirectory, "logo.ico"),
             Path.Combine(root, "logo.ico"),
             Path.Combine(root, "class-score-system", "logo.ico")
         };
 
+        // 高分屏下窗口图标按 150% 实际需要 48px，优先拿 64px 那帧再缩小，比放大清晰
+        var wanted = size ?? new Size(64, 64);
+
         foreach (var path in candidates)
         {
             if (!File.Exists(path)) continue;
-            try { return new Icon(path); } catch { }
+            try { return new Icon(path, wanted); } catch { }
         }
 
         return SystemIcons.Application;

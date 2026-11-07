@@ -8,11 +8,12 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>ClassScore.Desktop</AssemblyName>
+    <AssemblyName>class-score</AssemblyName>
     <RootNamespace>ClassScore.Desktop</RootNamespace>
     <ApplicationIcon>..\logo.ico</ApplicationIcon>
-    <AssemblyTitle>班级积分管理系统</AssemblyTitle>
-    <Product>班级积分管理系统</Product>
+    <AssemblyTitle>class-score</AssemblyTitle>
+    <Product>class-score</Product>
+    <Description>班级积分管理系统</Description>
     <Version>3.0.0</Version>
   </PropertyGroup>
 
