@@ -6,7 +6,7 @@
 # 本程序不含任何担保，详见仓库根目录的 LICENSE 文件。
 
 from fastapi import FastAPI, Request, Form, HTTPException, Response
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 import sqlite3
@@ -133,6 +133,12 @@ def _prune_sessions():
     now = time.time()
     for sid in [s for s, v in sessions.items() if v.get("expires", 0) <= now]:
         sessions.pop(sid, None)
+
+
+def ajax_login_required():
+    """ajax 自动保存时：会话过期返回 401 JSON，避免前端拿到 HTML 后误判。"""
+    return JSONResponse({"ok": False, "expired": True, "text": "登录已过期，请重新登录"},
+                        status_code=401)
 
 
 def get_session(request: Request):
@@ -820,10 +826,10 @@ def apply_autostart(enabled):
                 if root:
                     command += f' --root "{root}"'
                 command += " --tray"
-                winreg.SetValueEx(key, "ClassScoreDesktop", 0, winreg.REG_SZ, command)
+                winreg.SetValueEx(key, "class-score", 0, winreg.REG_SZ, command)
             else:
                 try:
-                    winreg.DeleteValue(key, "ClassScoreDesktop")
+                    winreg.DeleteValue(key, "class-score")
                 except FileNotFoundError:
                     pass
         finally:
@@ -1351,6 +1357,56 @@ async def security_middleware(request: Request, call_next):
 
 # 初始化页的一次性提示（导入旧库结果等）
 _init_notice = None
+_admin_kept = False          # 恢复出厂时勾选了「保留管理员」，初始化可跳过第一步
+
+
+BOOT_MODES = {"every": "每次登录一次", "daily": "每天一次", "off": "不开启"}
+
+
+def boot_should_show():
+    """按设置判断这次是否要播放启动动画。"""
+    boot = read_config().get("boot", {}) or {}
+
+    # 恢复出厂时保留了设置、且动画是关闭的：初始化后强制播一次
+    if boot.get("force_once"):
+        return True
+
+    mode = boot.get("mode", "every")
+    if mode == "off":
+        return False
+    if mode == "daily":
+        today = datetime.date.today().isoformat()
+        return boot.get("last_shown", "") != today
+    return True
+
+
+def boot_target():
+    """登录/初始化后该跳去哪儿。"""
+    return "/boot?to=/index" if boot_should_show() else "/index"
+
+
+def mark_boot_shown():
+    config = read_config()
+    config.setdefault("boot", {})
+    config["boot"]["last_shown"] = datetime.date.today().isoformat()
+    config["boot"]["force_once"] = False       # 只强制一次
+    write_config(config)
+
+
+# 启动动画：初始化完成后进入控制台前的过场
+@app.get("/boot", response_class=HTMLResponse)
+async def boot_page(request: Request, to: str = "/index"):
+    sid, sess = get_session(request)
+    if not sess or not sess.get("user"):
+        return RedirectResponse(url="/login")
+
+    # 只允许站内路径，避免被当成开放重定向
+    next_url = to if to.startswith("/") and not to.startswith("//") else "/index"
+    mark_boot_shown()
+    return render(request, "boot.html", {
+        "username": sess.get("user", ""),
+        "next_url": next_url,
+    })
 
 
 # 初始化第一步：设置管理密码
@@ -1366,6 +1422,15 @@ async def init_admin(request: Request):
         return render(request, "init_data_source.html", {
             "system_name": config["system"]["name"],
             "username": sess["pending_admin"]["username"],
+            "notice": _init_notice,
+            "error": None,
+        })
+
+    # 恢复出厂时勾选了「保留管理员」：管理员还在，直接进第二步选数据来源
+    if _admin_kept and config.get("admin", {}).get("password"):
+        return render(request, "init_data_source.html", {
+            "system_name": config["system"]["name"],
+            "username": config["admin"].get("username", "admin"),
             "notice": _init_notice,
             "error": None,
         })
@@ -1452,10 +1517,25 @@ async def init_complete(request: Request, csrf_token: str = Form(None)):
         raise HTTPException(status_code=403, detail="系统已初始化，请直接登录")
 
     sid, sess = get_session(request)
-    if not sess or not sess.get("pending_admin"):
-        return RedirectResponse(url="/", status_code=303)
+    if sess and sess.get("pending_admin"):
+        return _apply_pending_admin(request, sess)
 
-    return _apply_pending_admin(request, sess)
+    # 保留了管理员的情况：没有 pending_admin，直接把初始化标记清掉
+    global _admin_kept
+    if _admin_kept:
+        config["system"]["init_required"] = False
+        write_config(config)
+        _admin_kept = False
+
+        name = config.get("admin", {}).get("username", "admin")
+        session_id = secrets.token_hex(32)
+        sessions[session_id] = {"user": name, "expires": time.time() + SESSION_TTL}
+        response = RedirectResponse(url=boot_target(), status_code=303)
+        response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
+                            secure=_is_https(request), max_age=SESSION_TTL)
+        return response
+
+    return RedirectResponse(url="/", status_code=303)
 
 
 def _apply_pending_admin(request: Request, sess):
@@ -1468,11 +1548,14 @@ def _apply_pending_admin(request: Request, sess):
     config["system"]["init_required"] = False
     write_config(config)
 
+    global _admin_kept
+    _admin_kept = False
+
     sid = secrets.token_hex(32)
     sessions[sid] = {"user": pending.get("username", "admin"),
                      "expires": time.time() + SESSION_TTL}
 
-    response = RedirectResponse(url="/index", status_code=303)
+    response = RedirectResponse(url=boot_target(), status_code=303)
     response.set_cookie(SESSION_COOKIE, sid, httponly=True, samesite="lax",
                         secure=_is_https(request), max_age=SESSION_TTL)
     return response
@@ -1484,12 +1567,40 @@ SOUND_FAIL_KEYS = {"soft", "buzz", "double", "descend", "triple", "woodblock",
                    "thud", "alarm", "custom"}
 
 
-@app.post("/sound/settings")
-async def sound_settings(request: Request, ok_sound: str = Form("chime"),
-                         fail_sound: str = Form("triple"), csrf_token: str = Form(None)):
+@app.post("/boot/settings")
+async def boot_settings(request: Request, boot_mode: str = Form("every"),
+                        ajax: str = Form(None), csrf_token: str = Form(None)):
     check_csrf(request, csrf_token)
     sid, sess = get_session(request)
     if not sess:
+        if ajax:
+            return ajax_login_required()
+        return RedirectResponse(url="/login", status_code=303)
+
+    config = read_config()
+    config.setdefault("boot", {})
+    config["boot"]["mode"] = boot_mode if boot_mode in BOOT_MODES else "every"
+    if config["boot"]["mode"] == "every":
+        config["boot"]["last_shown"] = ""      # 每次登录都播，不需要记录日期
+    write_config(config)
+
+    text = f"启动动画已设为「{BOOT_MODES[config['boot']['mode']]}」"
+    if ajax:
+        return {"ok": True, "text": text}
+
+    sess["notice"] = {"kind": "success", "text": text}
+    return RedirectResponse(url="/setting#desktop-card", status_code=303)
+
+
+@app.post("/sound/settings")
+async def sound_settings(request: Request, ok_sound: str = Form("chime"),
+                         fail_sound: str = Form("triple"), ajax: str = Form(None),
+                         csrf_token: str = Form(None)):
+    check_csrf(request, csrf_token)
+    sid, sess = get_session(request)
+    if not sess:
+        if ajax:
+            return ajax_login_required()
         return RedirectResponse(url="/login", status_code=303)
 
     config = read_config()
@@ -1498,7 +1609,11 @@ async def sound_settings(request: Request, ok_sound: str = Form("chime"),
     config["sound"]["fail"] = fail_sound if fail_sound in SOUND_FAIL_KEYS else "triple"
     write_config(config)
 
-    sess["notice"] = {"kind": "success", "text": "核销提示音已保存，回到核销页扫一张就能听到"}
+    text = "核销提示音已保存，回到核销页扫一张就能听到"
+    if ajax:
+        return {"ok": True, "text": text}
+
+    sess["notice"] = {"kind": "success", "text": text}
     return RedirectResponse(url="/setting#sound-card", status_code=303)
 
 
@@ -1592,7 +1707,7 @@ async def submit_init_admin(request: Request, username: str = Form(...), passwor
     # 初始化完成直接建立会话进入控制台，不再要求重新登录一次
     session_id = secrets.token_hex(32)
     sessions[session_id] = {"user": username, "expires": time.time() + SESSION_TTL}
-    response = RedirectResponse(url="/index", status_code=303)
+    response = RedirectResponse(url=boot_target(), status_code=303)
     response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
                         secure=_is_https(request), max_age=SESSION_TTL)
     return response
@@ -1627,6 +1742,7 @@ async def submit_login(request: Request, username: str = Form(...), password: st
         return render(request, "login.html", {"system_name": system_name, "error": True})
 
     _clear_login_failures(ip)
+    # 每次登录成功都先播放启动动画，再进入控制台
     # 历史明文口令登录成功后自动升级为 PBKDF2 哈希
     if needs_upgrade:
         config["admin"]["password"] = hash_password(password)
@@ -1634,7 +1750,7 @@ async def submit_login(request: Request, username: str = Form(...), password: st
 
     session_id = secrets.token_hex(32)
     sessions[session_id] = {"user": username, "expires": time.time() + SESSION_TTL}
-    response = RedirectResponse(url="/index", status_code=303)
+    response = RedirectResponse(url=boot_target(), status_code=303)
     response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax",
                         secure=_is_https(request), max_age=SESSION_TTL)
     return response
@@ -1672,6 +1788,10 @@ async def generate(request: Request):
         "success": False,
         "history": history_pending(),
         "printer_value": (config.get("print", {}) or {}).get("printer", "") or "",
+        # 每页排版参数：页面用来提示「生成多少张正好整页，不浪费纸」
+        "rows_per_page": CARD_ROWS_PER_PAGE,
+        "cols_per_page": CARD_COLUMNS_PER_PAGE,
+        "cards_per_page": CARD_ROWS_PER_PAGE * CARD_COLUMNS_PER_PAGE,
     })
 
 # 提交生成积分（结果存会话，避免多人共用时互相串号）
@@ -1692,6 +1812,9 @@ async def submit_generate(request: Request, class_name: str = Form(...), title: 
     title = (title or "").strip()
     if not class_name or not title:
         return render(request, "generate.html", {
+        "rows_per_page": CARD_ROWS_PER_PAGE,
+        "cols_per_page": CARD_COLUMNS_PER_PAGE,
+        "cards_per_page": CARD_ROWS_PER_PAGE * CARD_COLUMNS_PER_PAGE,
             "system_name": system_name, "success": False, "error": "班级名称和积分卡标题都不能为空"})
     if amount <= 0:
         return render(request, "generate.html", {
@@ -1961,6 +2084,8 @@ async def setting(request: Request):
         "backup_count": len(list_backups()),
         "last_backup": last_backup_time(),
         "backup_dir": get_backup_dir(),
+        "boot_mode": (config.get("boot", {}) or {}).get("mode", "every"),
+        "boot_modes": BOOT_MODES,
         "sound_ok": (config.get("sound", {}) or {}).get("ok", "chime"),
         "sound_fail": (config.get("sound", {}) or {}).get("fail", "triple"),
         "backup_time": backup_time,
@@ -1999,8 +2124,8 @@ async def submit_setting(request: Request, current_password: str = Form(...), pa
     return RedirectResponse(url="/setting", status_code=303)
 
 # 恢复出厂设置
-def do_reset():
-    """删除数据库、清空配置、删除输出文件"""
+def do_reset(keep_settings=False, keep_admin=False):
+    """删除数据库与导出文件；可选择保留现有设置和管理员账号。"""
     # 删除数据库
     db_path = get_db_path()
     if os.path.exists(db_path):
@@ -2018,11 +2143,36 @@ def do_reset():
                     os.remove(fp)
                 except PermissionError:
                     pass  # 文件被占用，跳过
-    # 重置配置（使用默认配置，init_required=True）
-    write_config(get_default_config())
+    # 重置配置：默认回到出厂；勾选保留时沿用原来那部分
+    if keep_settings or keep_admin:
+        fresh = get_default_config()
+        fresh["system"]["init_required"] = True
+
+        if keep_settings:
+            for section in ("system", "print", "sound", "boot", "backup", "desktop", "paths"):
+                if section in config:
+                    fresh[section] = config[section]
+            fresh["system"]["init_required"] = True
+
+        if keep_admin and config.get("admin"):
+            fresh["admin"] = config["admin"]
+
+        # 保留了设置且启动动画是「不开启」：初始化完成后强制播一次
+        if keep_settings and (fresh.get("boot", {}) or {}).get("mode") == "off":
+            fresh.setdefault("boot", {})
+            fresh["boot"]["force_once"] = True
+
+        write_config(fresh)
+    else:
+        write_config(get_default_config())
+
     # 清空会话与登录节流记录
     sessions.clear()
     _login_failures.clear()
+    # 保留管理员时，初始化第一步可以跳过
+    if keep_admin:
+        global _admin_kept
+        _admin_kept = True
 
 # ---------------- 备份 ----------------
 
@@ -2066,13 +2216,17 @@ async def backup_open(request: Request, csrf_token: str = Form(None)):
 @app.post("/backup/settings")
 async def backup_settings(request: Request, backup_time: str = Form("02:00"),
                           keep: int = Form(10), enabled: str = Form(None),
-                          csrf_token: str = Form(None)):
+                          ajax: str = Form(None), csrf_token: str = Form(None)):
     check_csrf(request, csrf_token)
     sid, sess = get_session(request)
     if not sess:
+        if ajax:
+            return ajax_login_required()
         return RedirectResponse(url="/login", status_code=303)
 
     if not re.fullmatch(r"\d{1,2}:\d{2}", (backup_time or "").strip()):
+        if ajax:
+            return {"ok": False, "text": "备份时间格式应为 HH:MM，例如 02:30"}
         sess["notice"] = {"kind": "error", "text": "备份时间格式应为 HH:MM，例如 02:30"}
         return RedirectResponse(url="/setting", status_code=303)
 
@@ -2095,21 +2249,30 @@ async def backup_settings(request: Request, backup_time: str = Form("02:00"),
         text = f"已开启每日 {hour:02d}:{minute:02d} 自动备份，最多保留 {keep} 份"
     else:
         text = "已关闭定时备份"
+
+    if ajax:
+        return {"ok": True, "text": text, "next_backup": next_backup_time()}
+
     sess["notice"] = {"kind": "success", "text": text}
     return RedirectResponse(url="/setting", status_code=303)
 
 
 @app.post("/print/settings")
-async def print_settings(request: Request, printer: str = Form(""), csrf_token: str = Form(None)):
+async def print_settings(request: Request, printer: str = Form(""), ajax: str = Form(None),
+                         csrf_token: str = Form(None)):
     check_csrf(request, csrf_token)
     sid, sess = get_session(request)
     if not sess:
+        if ajax:
+            return ajax_login_required()
         return RedirectResponse(url="/login", status_code=303)
 
     printer = (printer or "").strip()
     if printer:
         names, _ = list_printers()
         if printer not in names:
+            if ajax:
+                return {"ok": False, "text": f"找不到该打印机：{printer}"}
             sess["notice"] = {"kind": "error", "text": f"找不到该打印机：{printer}"}
             return RedirectResponse(url="/setting", status_code=303)
 
@@ -2118,19 +2281,22 @@ async def print_settings(request: Request, printer: str = Form(""), csrf_token: 
     config["print"]["printer"] = printer
     write_config(config)
 
-    sess["notice"] = {
-        "kind": "success",
-        "text": f"打印将使用：{printer}" if printer else "打印将使用系统默认打印机",
-    }
+    text = f"打印将使用：{printer}" if printer else "打印将使用系统默认打印机"
+    if ajax:
+        return {"ok": True, "text": text}
+
+    sess["notice"] = {"kind": "success", "text": text}
     return RedirectResponse(url="/setting", status_code=303)
 
 
 @app.post("/desktop/autostart")
 async def desktop_autostart(request: Request, autostart: str = Form(None),
-                            csrf_token: str = Form(None)):
+                            ajax: str = Form(None), csrf_token: str = Form(None)):
     check_csrf(request, csrf_token)
     sid, sess = get_session(request)
     if not sess:
+        if ajax:
+            return ajax_login_required()
         return RedirectResponse(url="/login", status_code=303)
 
     enabled = bool(autostart)
@@ -2144,6 +2310,9 @@ async def desktop_autostart(request: Request, autostart: str = Form(None),
         text = "已开启开机自启" if applied else "已开启开机自启，下次启动桌面版时生效"
     else:
         text = "已关闭开机自启" if applied else "已关闭开机自启，下次启动桌面版时生效"
+
+    if ajax:
+        return {"ok": True, "text": text}
 
     sess["notice"] = {"kind": "success", "text": text}
     return RedirectResponse(url="/setting", status_code=303)
@@ -2177,7 +2346,9 @@ async def cleanup_junk(request: Request, csrf_token: str = Form(None)):
 
 # 提交恢复出厂设置
 @app.post("/reset")
-async def reset_system(request: Request, reset_password: str = Form(...), csrf_token: str = Form(None)):
+async def reset_system(request: Request, reset_password: str = Form(...),
+                        keep_settings: str = Form(None), keep_admin: str = Form(None),
+                        csrf_token: str = Form(None)):
     check_csrf(request, csrf_token)
     sid, sess = get_session(request)
     if not sess:
@@ -2187,7 +2358,7 @@ async def reset_system(request: Request, reset_password: str = Form(...), csrf_t
     if not ok:
         sess["setting"] = "reset_wrong_password"
         return RedirectResponse(url="/setting", status_code=303)
-    do_reset()
+    do_reset(keep_settings=bool(keep_settings), keep_admin=bool(keep_admin))
     return RedirectResponse(url="/", status_code=303)
 
 

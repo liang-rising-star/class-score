@@ -54,8 +54,18 @@
                     <div class="field">
                         <label for="quantity">批量生成数量</label>
                         <input type="number" id="quantity" name="quantity" required min="1" max="500" step="1"
-                               placeholder="1 - 500">
+                               placeholder="1 - 500"
+                               data-per-page="{{ cards_per_page }}"
+                               data-rows="{{ rows_per_page }}"
+                               data-cols="{{ cols_per_page }}">
                         <div class="field-hint">单次上限 500 张</div>
+
+                        <div class="page-hint" id="pageHint" hidden>
+                            <span class="page-hint__text" id="pageHintText"></span>
+                            <button type="button" class="page-hint__apply" id="pageHintApply" hidden>
+                                填满整页
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div class="form-actions">
@@ -295,5 +305,62 @@
 })();
 </script>
 
+
+<script>
+// 生成数量提示：按 A4 每页排版算「生成多少张正好整页」，避免半页浪费
+(function() {
+    var input = document.getElementById('quantity');
+    var amount = document.getElementById('amount');
+    var hint = document.getElementById('pageHint');
+    var text = document.getElementById('pageHintText');
+    var applyBtn = document.getElementById('pageHintApply');
+    if (!input || !hint) return;
+
+    var perPage = Number(input.dataset.perPage) || 21;
+    var rows = Number(input.dataset.rows) || 7;
+    var cols = Number(input.dataset.cols) || 3;
+    var suggested = 0;
+
+    function fmt(n) { return n.toLocaleString('zh-CN'); }
+
+    function update() {
+        var qty = parseInt(input.value, 10);
+        if (!qty || qty < 1) {
+            hint.hidden = true;
+            return;
+        }
+
+        var pages = Math.ceil(qty / perPage);
+        var exact = pages * perPage;
+        var waste = exact - qty;
+        suggested = exact;
+
+        // 只保留一句结论：生成多少张正好填满几页
+        if (waste === 0) {
+            text.textContent = '正好填满 ' + pages + ' 页';
+            applyBtn.hidden = true;
+        } else {
+            text.textContent = '建议生成 ' + exact + ' 张正好填满 ' + pages + ' 页';
+            applyBtn.hidden = false;
+            applyBtn.textContent = '改成 ' + exact + ' 张';
+        }
+
+        hint.hidden = false;
+        hint.classList.toggle('is-exact', waste === 0);
+    }
+
+    input.addEventListener('input', update);
+
+    applyBtn.addEventListener('click', function() {
+        if (!suggested) return;
+        input.value = suggested;
+        update();
+        input.focus();
+    });
+
+    // 页面加载时如果带了上次的值，也提示一下
+    if (input.value) update();
+})();
+</script>
 </body>
 </html>

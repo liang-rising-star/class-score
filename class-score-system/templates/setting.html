@@ -24,7 +24,7 @@
         <div class="alert alert-{{ 'success' if notice.kind == 'success' else ('error' if notice.kind == 'error' else 'info') }}">{{ notice.text }}</div>
         {% endif %}
 
-        <div class="card">
+        <div class="card" id="desktop-card">
             <div class="card-title">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -35,7 +35,7 @@
             </div>
             <p class="card-sub">仅在桌面版（托盘常驻）下生效，网页版不受影响</p>
 
-            <form action="/desktop/autostart" method="post">
+            <form action="/desktop/autostart" method="post" data-autosave="1">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <label class="switch">
                     <span class="switch__text">
@@ -45,10 +45,22 @@
                     <input type="checkbox" name="autostart" {% if autostart %}checked{% endif %}>
                     <span class="switch__track" aria-hidden="true"></span>
                 </label>
-                <div class="form-actions">
-                    <button type="submit" class="btn">保存设置</button>
-                </div>
                 <p class="field-hint">勾选后，下次启动桌面版会把本程序登记到当前用户的启动项</p>
+            </form>
+
+            <form action="/boot/settings" method="post" class="card-block" data-autosave="1">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="field">
+                    <label for="bootMode">启动动画</label>
+                    <select id="bootMode" name="boot_mode">
+                        {% for key, label in boot_modes.items() %}
+                        <option value="{{ key }}" {% if boot_mode == key %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="field-hint">
+                        登录成功后播放的过场动画：每次登录都播、每天只播第一次、或直接关掉
+                    </div>
+                </div>
             </form>
         </div>
 
@@ -64,7 +76,7 @@
             </div>
             <p class="card-sub">生成积分后点「直接打印」时使用的打印机</p>
 
-            <form action="/print/settings" method="post">
+            <form action="/print/settings" method="post" data-autosave="1">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="field">
                     <label for="printer">使用的打印机</label>
@@ -84,9 +96,6 @@
                         {% endif %}
                     </div>
                 </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn">保存设置</button>
-                </div>
             </form>
         </div>
 
@@ -104,7 +113,7 @@
 
             <input type="file" id="soundFile" accept="audio/*" hidden>
 
-            <form action="/sound/settings" method="post">
+            <form action="/sound/settings" method="post" data-autosave="1">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
                 <div class="form-grid">
@@ -129,14 +138,10 @@
                     选「自定义音频…」可导入自己的音频文件（≤400KB），文件保存在本机浏览器，不随配置同步；
                     预设音效由程序实时合成，不占空间
                 </div>
-
-                <div class="form-actions">
-                    <button type="submit" class="btn">保存设置</button>
-                </div>
             </form>
         </div>
 
-        <div class="card">
+        <div class="card" id="backup-card">
             <div class="card-title">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -145,117 +150,112 @@
                 </svg>
                 数据备份
             </div>
-            <p class="card-sub">把配置和积分数据库打包成 zip，保存在 data/backups 目录；也可以从 2.x 旧版本导入积分记录</p>
+            <p class="card-sub">每天到点自动把配置和数据库打包到 data/backups，也可以随时手动备份；改完设置会自动保存</p>
 
-            <div class="stat-row">
-                <div class="stat-item">
-                    <span class="stat-label">最近备份</span>
-                    <span class="stat-value">{{ last_backup or '尚未备份' }}</span>
+            <div class="backup-section">
+                <div class="backup-section__title">
+                    定时备份
+                    <span class="autosave-badge" id="backupSaved" hidden>已保存</span>
                 </div>
-                <div class="stat-item">
-                    <span class="stat-label">已有备份</span>
-                    <span class="stat-value">{{ backup_count }} 份</span>
-                </div>
-            </div>
 
-            <div class="form-actions">
-                <form action="/backup/now" method="post">
+                <form action="/backup/settings" method="post" id="backupScheduleForm" data-autosave="1">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button type="submit" class="btn">立即备份</button>
-                </form>
-                <form action="/backup/open" method="post">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button type="submit" class="btn btn-ghost">打开备份文件夹</button>
-                </form>
-                <form action="/import_legacy" method="post" id="legacyForm">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <input type="hidden" name="legacy_path" id="legacy_path" value="">
-                    <button type="button" id="importLegacyBtn" class="btn btn-ghost">导入 2.x 旧库</button>
-                </form>
-            </div>
-        </div>
 
-        <div class="card">
-            <div class="card-title">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="9"></circle>
-                    <path d="M12 7v5l3 2"></path>
-                </svg>
-                自动备份
-            </div>
-            <p class="card-sub">每天到指定时间自动备份，最多保留指定份数，超出后删除最旧的一份</p>
+                    <div class="form-grid">
+                        <div class="field">
+                            <label for="tpField">每天备份时间</label>
+                            <div class="tp" id="tp">
+                                <button type="button" class="tp__field" id="tpField">
+                                    <span class="tp__text" id="tpText">{{ backup_time }}</span>
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                         stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <circle cx="12" cy="12" r="9"></circle>
+                                        <path d="M12 7.5V12l3 2"></path>
+                                    </svg>
+                                </button>
+                                <input type="hidden" id="backup_time" name="backup_time" value="{{ backup_time }}">
 
-            <form action="/backup/settings" method="post">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="form-grid">
-                    <div class="field">
-                        <label for="tpField">每天备份时间</label>
-                        <div class="tp" id="tp">
-                            <button type="button" class="tp__field" id="tpField">
-                                <span class="tp__text" id="tpText">{{ backup_time }}</span>
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                     stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <circle cx="12" cy="12" r="9"></circle>
-                                    <path d="M12 7.5V12l3 2"></path>
-                                </svg>
-                            </button>
-                            <input type="hidden" id="backup_time" name="backup_time" value="{{ backup_time }}">
+                                <div class="tp__pop" id="tpPop" hidden>
+                                    <div class="tp__title">选择备份时间</div>
 
-                            <div class="tp__pop" id="tpPop" hidden>
-                                <div class="tp__title">选择备份时间</div>
+                                    <div class="tp__preview">
+                                        <span id="tpPreviewH">02</span><em>:</em><span id="tpPreviewM">00</span>
+                                    </div>
 
-                                <div class="tp__preview">
-                                    <span id="tpPreviewH">02</span><em>:</em><span id="tpPreviewM">00</span>
-                                </div>
+                                    <div class="tp__wheels">
+                                        <div class="tp__band" aria-hidden="true"></div>
+                                        <div class="tp__wheel" id="tpHWheel" tabindex="0"></div>
+                                        <div class="tp__wheel" id="tpMWheel" tabindex="0"></div>
+                                    </div>
 
-                                <div class="tp__wheels">
-                                    <div class="tp__band" aria-hidden="true"></div>
-                                    <div class="tp__wheel" id="tpHWheel" tabindex="0"></div>
-                                    <div class="tp__wheel" id="tpMWheel" tabindex="0"></div>
-                                </div>
+                                    <div class="tp__presets">
+                                        <button type="button" class="tp__preset" data-time="00:00">00:00</button>
+                                        <button type="button" class="tp__preset" data-time="02:00">02:00</button>
+                                        <button type="button" class="tp__preset" data-time="08:00">08:00</button>
+                                        <button type="button" class="tp__preset" data-time="12:00">12:00</button>
+                                        <button type="button" class="tp__preset" data-time="22:00">22:00</button>
+                                    </div>
 
-                                <div class="tp__presets">
-                                    <button type="button" class="tp__preset" data-time="00:00">00:00</button>
-                                    <button type="button" class="tp__preset" data-time="02:00">02:00</button>
-                                    <button type="button" class="tp__preset" data-time="08:00">08:00</button>
-                                    <button type="button" class="tp__preset" data-time="12:00">12:00</button>
-                                    <button type="button" class="tp__preset" data-time="22:00">22:00</button>
-                                </div>
-
-                                <div class="tp__actions">
-                                    <button type="button" class="btn btn-ghost btn-sm" id="tpCancel">取消</button>
-                                    <button type="button" class="btn btn-sm" id="tpOk">确定</button>
+                                    <div class="tp__actions">
+                                        <button type="button" class="btn btn-ghost btn-sm" id="tpCancel">取消</button>
+                                        <button type="button" class="btn btn-sm" id="tpOk">确定</button>
+                                    </div>
                                 </div>
                             </div>
+                            <div class="field-hint">
+                                {% if next_backup %}下次自动备份：{{ next_backup }}{% else %}定时备份已关闭{% endif %}
+                            </div>
                         </div>
-                        <div class="field-hint">
-                            {% if next_backup %}下次自动备份：{{ next_backup }}{% else %}定时备份已关闭{% endif %}
+                        <div class="field">
+                            <label for="keep">最多保留份数</label>
+                            <input type="number" id="keep" name="keep" min="1" max="200" step="1"
+                                   value="{{ backup_keep }}" required>
+                            <div class="field-hint">超出后自动删除最旧的一份</div>
                         </div>
                     </div>
-                    <div class="field">
-                        <label for="keep">最多保留份数</label>
-                        <input type="number" id="keep" name="keep" min="1" max="200" step="1"
-                               value="{{ backup_keep }}" required>
-                        <div class="field-hint">超出后自动删除最旧的一份</div>
+
+                    <label class="switch">
+                        <span class="switch__text">
+                            启用定时备份
+                            <span class="switch__hint">每天到点自动把配置和数据库打包备份一次</span>
+                        </span>
+                        <input type="checkbox" name="enabled" {% if backup_enabled %}checked{% endif %}>
+                        <span class="switch__track" aria-hidden="true"></span>
+                    </label>
+                </form>
+            </div>
+
+            <div class="card-block">
+                <div class="backup-section__title">立即备份</div>
+
+                <div class="stat-row">
+                    <div class="stat-item">
+                        <span class="stat-label">最近备份</span>
+                        <span class="stat-value">{{ last_backup or '尚未备份' }}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">已有备份</span>
+                        <span class="stat-value">{{ backup_count }} 份</span>
                     </div>
                 </div>
-
-                <label class="switch">
-                    <span class="switch__text">
-                        启用定时备份
-                        <span class="switch__hint">每天到点自动把配置和数据库打包备份一次</span>
-                    </span>
-                    <input type="checkbox" name="enabled" {% if backup_enabled %}checked{% endif %}>
-                    <span class="switch__track" aria-hidden="true"></span>
-                </label>
 
                 <div class="form-actions">
-                    <button type="submit" class="btn">保存设置</button>
+                    <form action="/backup/now" method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="btn">立即备份</button>
+                    </form>
+                    <form action="/backup/open" method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="btn btn-ghost">打开备份文件夹</button>
+                    </form>
+                    <form action="/import_legacy" method="post" id="legacyForm">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="legacy_path" id="legacy_path" value="">
+                        <button type="button" id="importLegacyBtn" class="btn btn-ghost">导入 2.x 旧库</button>
+                    </form>
                 </div>
-            </form>
+            </div>
         </div>
-
         <div class="card">
             <div class="card-title">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -296,33 +296,9 @@
             </div>
             <p class="card-sub">修改后立即生效，当前会话保持登录状态</p>
 
-            {% if success %}
-            <div class="alert alert-success">密码修改成功！</div>
-            {% elif wrong_password %}
-            <div class="alert alert-error">当前密码错误！</div>
-            {% elif message %}
-            <div class="alert alert-error">{{ message }}</div>
-            {% endif %}
-
-            <form action="/setting" method="post">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="form-grid">
-                    <div class="field">
-                        <label for="current_password">当前密码</label>
-                        <input type="password" id="current_password" name="current_password" required
-                               autocomplete="current-password">
-                    </div>
-                    <div class="field">
-                        <label for="password">新密码</label>
-                        <input type="password" id="password" name="password" required minlength="4"
-                               autocomplete="new-password">
-                        <div class="field-hint">至少 4 位，以 PBKDF2 加盐哈希保存</div>
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn">保存</button>
-                </div>
-            </form>
+            <div class="form-actions">
+                <button type="button" id="openPassword" class="btn btn-ghost">修改密码</button>
+            </div>
         </div>
 
         <div class="danger-card">
@@ -364,6 +340,8 @@
                    class="page-footer__link">github.com/liang-rising-star/class-score</a>
             </p>
         </footer>
+
+        <div class="save-toast" id="saveToast" hidden>已保存</div>
     </main>
 
     <!-- 清理确认弹窗 -->
@@ -386,6 +364,55 @@
     </dialog>
 
     </div>
+
+<!-- 修改密码：弹窗里输入，确认后提交 -->
+<dialog id="passwordDialog" class="modal" aria-labelledby="passwordTitle"
+        {% if success or wrong_password or message %}data-autoshow="1"{% endif %}>
+    <form action="/setting" method="post" class="modal__body">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="modal__icon modal__icon--info">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="4" y="10" width="16" height="10" rx="2"></rect>
+                <path d="M8 10V7a4 4 0 1 1 8 0v3"></path>
+            </svg>
+        </div>
+        <h3 class="modal__title" id="passwordTitle">修改管理密码</h3>
+        <p class="modal__text">先输入当前密码验证身份，再设置新的管理密码；保存后立即生效。</p>
+
+        {% if success %}
+        <div class="alert alert-success" style="margin-bottom:16px">密码修改成功</div>
+        {% elif wrong_password %}
+        <div class="alert alert-error" style="margin-bottom:16px">当前密码错误，请重新输入</div>
+        {% elif message %}
+        <div class="alert alert-error" style="margin-bottom:16px">{{ message }}</div>
+        {% endif %}
+
+        <div class="field">
+            <label for="current_password">当前密码</label>
+            <input type="password" id="current_password" name="current_password" required
+                   autocomplete="current-password" placeholder="当前登录密码">
+        </div>
+
+        <div class="field">
+            <label for="password">新密码</label>
+            <input type="password" id="password" name="password" required minlength="4"
+                   autocomplete="new-password" placeholder="至少 4 位">
+            <div class="field-hint">至少 4 位，以 PBKDF2 加盐哈希保存</div>
+        </div>
+
+        <div class="field">
+            <label for="password2">确认新密码</label>
+            <input type="password" id="password2" name="password2" required minlength="4"
+                   autocomplete="new-password" placeholder="再输入一次">
+        </div>
+
+        <div class="modal__actions">
+            <button type="button" id="passwordCancel" class="btn btn-ghost">取消</button>
+            <button type="submit" class="btn">确认修改</button>
+        </div>
+    </form>
+</dialog>
 
 <!-- 恢复出厂设置：输入密码确认 -->
 <dialog id="resetDialog" class="modal" aria-labelledby="resetTitle"
@@ -412,6 +439,24 @@
             <label for="reset_password">输入当前密码以确认</label>
             <input type="password" id="reset_password" name="reset_password" required
                    autocomplete="current-password" placeholder="当前登录密码">
+        </div>
+
+        <div class="reset-options">
+            <label class="check-row">
+                <input type="checkbox" name="keep_settings" value="1">
+                <span class="check-row__body">
+                    <b>保留当前系统的设置</b>
+                    <span>打印机、提示音、备份计划、开机自启等设置不会被重置</span>
+                </span>
+            </label>
+
+            <label class="check-row">
+                <input type="checkbox" name="keep_admin" value="1">
+                <span class="check-row__body">
+                    <b>保留管理员账号和密码</b>
+                    <span>重置后无需重新设置密码，直接选择数据来源即可</span>
+                </span>
+            </label>
         </div>
 
         <div class="modal__actions">
@@ -728,6 +773,153 @@
 (function() {
     if (!window.SoundKit) return;
     SoundKit.mountPicker({ okSelect: 'okSound', failSelect: 'failSound', fileInput: 'soundFile' });
+})();
+</script>
+
+<script>
+// 设置项统一自动保存：改完即生效，不需要点「保存设置」
+(function() {
+    var toast = document.getElementById('saveToast');
+    var toastTimer = null;
+
+    function showToast(text, ok) {
+        if (!toast) return;
+        toast.textContent = text || (ok ? '已保存' : '保存失败');
+        toast.classList.toggle('is-error', !ok);
+        toast.hidden = false;
+        toast.classList.add('is-show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(function() {
+            toast.classList.remove('is-show');
+            setTimeout(function() { toast.hidden = true; }, 260);
+        }, 1500);
+    }
+
+    function save(form) {
+        var data = new FormData(form);
+        data.set('ajax', '1');
+
+        fetch(form.action, {
+            method: 'POST',
+            body: new URLSearchParams(data),
+            headers: { 'X-Requested-With': 'fetch' }
+        })
+        .then(function(r) {
+            // 会话过期时后端返回 401 JSON，而不是跳转登录页
+            if (r.status === 401) {
+                return r.json().then(function(res) {
+                    showToast(res.text || '登录已过期，请重新登录', false);
+                    setTimeout(function() { location.href = '/login'; }, 900);
+                    throw new Error('session-expired');
+                });
+            }
+            if (r.status === 403) {
+                // CSRF 令牌过期（页面放太久 / cookie 被清）：刷新一次页面即可恢复
+                return r.json().then(function(res) {
+                    var msg = res.detail || res.text || '校验失败，请刷新页面';
+                    showToast(msg, false);
+                    setTimeout(function() { location.reload(); }, 1200);
+                    throw new Error('session-expired');
+                }).catch(function() {
+                    showToast('校验失败，请刷新页面后重试', false);
+                    setTimeout(function() { location.reload(); }, 1200);
+                    throw new Error('session-expired');
+                });
+            }
+            if (!String(r.headers.get('content-type') || '').includes('json')) {
+                // 兜底：拿到 HTML 说明被重定向了（通常是登录态失效）
+                showToast('登录已过期，请重新登录', false);
+                setTimeout(function() { location.href = '/login'; }, 900);
+                throw new Error('not-json');
+            }
+            return r.json();
+        })
+        .then(function(res) {
+            showToast(res.ok ? '已保存' : (res.text || '保存失败'), res.ok);
+
+            // 备份卡片顺带更新「下次自动备份」提示
+            if (form.id === 'backupScheduleForm' && res.ok && res.next_backup) {
+                var hint = form.querySelector('.field-hint');
+                if (hint) hint.textContent = '下次自动备份：' + res.next_backup;
+            }
+        })
+        .catch(function(err) {
+            if (err && /session-expired|not-json/.test(err.message)) return;
+            showToast('保存失败，请检查后重试', false);
+        });
+    }
+
+    [].forEach.call(document.querySelectorAll('form[data-autosave="1"]'), function(form) {
+        var inputTimer = null;
+
+        form.addEventListener('change', function() { save(form); });
+
+        // 数字框：停止输入 0.6 秒后保存
+        [].forEach.call(form.querySelectorAll('input[type="number"]'), function(input) {
+            input.addEventListener('input', function() {
+                clearTimeout(inputTimer);
+                inputTimer = setTimeout(function() { save(form); }, 600);
+            });
+        });
+    });
+
+    // 自定义时间选择器点「确定」后，select/隐藏域不会触发 change，这里补一次
+    var tpOk = document.getElementById('tpOk');
+    var backupForm = document.getElementById('backupScheduleForm');
+    if (tpOk && backupForm) {
+        tpOk.addEventListener('click', function() { setTimeout(function() { save(backupForm); }, 60); });
+    }
+})();
+</script>
+
+<script>
+// 修改密码弹窗：与恢复出厂设置同样的交互
+(function() {
+    var openBtn = document.getElementById('openPassword');
+    var dialog = document.getElementById('passwordDialog');
+    if (!openBtn || !dialog) return;
+
+    var current = dialog.querySelector('input[name="current_password"]');
+    var pwd = dialog.querySelector('input[name="password"]');
+    var pwd2 = dialog.querySelector('input[name="password2"]');
+    var form = dialog.querySelector('form');
+
+    function clearError() {
+        var err = dialog.querySelector('.alert');
+        if (err) err.remove();
+        delete dialog.dataset.autoshow;
+    }
+
+    function open(keepError) {
+        if (!keepError) clearError();
+        if (typeof dialog.showModal === 'function') {
+            dialog.showModal();
+            if (current) { current.focus(); current.select(); }
+        }
+    }
+
+    openBtn.addEventListener('click', function() { open(false); });
+
+    document.getElementById('passwordCancel').addEventListener('click', function() {
+        dialog.close();
+    });
+
+    dialog.addEventListener('click', function(e) {
+        if (e.target === dialog) dialog.close();
+    });
+
+    // 两次新密码不一致时当场拦下
+    form.addEventListener('submit', function(e) {
+        if (pwd.value !== pwd2.value) {
+            e.preventDefault();
+            pwd2.setCustomValidity('两次输入的新密码不一致');
+            pwd2.reportValidity();
+            setTimeout(function() { pwd2.setCustomValidity(''); }, 2500);
+        }
+    });
+
+    // 服务端打回（密码错误 / 成功）时自动重开弹窗
+    if (dialog.dataset.autoshow === '1') open(true);
 })();
 </script>
 </body>

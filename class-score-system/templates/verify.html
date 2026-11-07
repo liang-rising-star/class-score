@@ -22,6 +22,7 @@
 
         <div class="card">
             <div class="mode-tabs" role="tablist">
+                <span class="mode-tabs__thumb" aria-hidden="true"></span>
                 <button type="button" class="mode-tab is-active" data-mode="single" role="tab">单个核销</button>
                 <button type="button" class="mode-tab" data-mode="batch" role="tab">批量核销</button>
             </div>
@@ -173,14 +174,38 @@
     var panels = { single: document.getElementById('panel-single'), batch: document.getElementById('panel-batch') };
     if (!tabs.length) return;
 
+    var thumb = document.querySelector('.mode-tabs__thumb');
+
+    function moveThumb() {
+        if (!thumb) return;
+        var active = document.querySelector('.mode-tab.is-active');
+        if (!active) return;
+        thumb.style.width = active.offsetWidth + 'px';
+        thumb.style.transform = 'translateX(' + active.offsetLeft + 'px)';
+    }
+
     function activate(mode) {
         [].forEach.call(tabs, function(t) { t.classList.toggle('is-active', t.dataset.mode === mode); });
-        Object.keys(panels).forEach(function(k) { if (panels[k]) panels[k].hidden = (k !== mode); });
+        Object.keys(panels).forEach(function(k) {
+            if (!panels[k]) return;
+            var show = (k === mode);
+            if (show && panels[k].hidden) {
+                panels[k].classList.remove('is-enter');
+                void panels[k].offsetWidth;          // 强制重排，动画重新播放
+                panels[k].classList.add('is-enter');
+            }
+            panels[k].hidden = !show;
+        });
+        moveThumb();
         if (mode === 'single') {
             var input = document.getElementById('scanInput');
             if (input) input.focus();
         }
     }
+
+    // 首次进入时把滑块对准当前选中项
+    requestAnimationFrame(moveThumb);
+    window.addEventListener('resize', moveThumb);
 
     [].forEach.call(tabs, function(tab) {
         tab.addEventListener('click', function() { activate(tab.dataset.mode); });
