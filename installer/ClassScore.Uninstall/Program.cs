@@ -393,26 +393,94 @@ internal static class Uninstaller
 
     private static void KillAppProcesses(string dir)
     {
-        foreach (var name in new[] { Path.GetFileNameWithoutExtension(Program.ExeName), "python" })
+        // 1) 主程序：按进程名全杀（exe 名是我们独有的 class-score）
+        foreach (var proc in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Program.ExeName)))
         {
             try
             {
-                foreach (var proc in Process.GetProcessesByName(name))
-                {
-                    try
-                    {
-                        var path = proc.MainModule?.FileName;
-                        if (path is null || !IsInside(dir, path)) continue;
-                        proc.Kill(entireProcessTree: true);
-                        proc.WaitForExit(3000);
-                    }
-                    catch { }
-                }
+                proc.Kill(entireProcessTree: true);
+                proc.WaitForExit(3000);
             }
             catch { }
         }
 
-        Thread.Sleep(500);
+        // 2) 后端 python：先按可执行文件路径匹配
+        var killed = new HashSet<int>();
+        foreach (var proc in Process.GetProcessesByName("python"))
+        {
+            try
+            {
+                var path = proc.MainModule?.FileName;
+                if (path is null || !IsInside(dir, path)) continue;
+                proc.Kill(entireProcessTree: true);
+                proc.WaitForExit(2000);
+                killed.Add(proc.Id);
+            }
+            catch { }
+        }
+
+        // 3) 路径取不到（权限不足）时，用 wmic 查命令行再补刀
+        try
+        {
+            var psi = new ProcessStartInfo("cmd.exe",
+                "/c wmic process where \"name='python.exe'\" get ProcessId,CommandLine /format:csv")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+            };
+
+            using var p = Process.Start(psi);
+            if (p is not null)
+            {
+                var output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(8000);
+
+                foreach (var line in output.Split((char)10))
+                {
+                    if (!line.Contains(dir, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var parts = line.Trim().Split(',');
+                    if (parts.Length < 2) continue;
+                    if (!int.TryParse(parts[^1].Trim(), out var pid)) continue;
+                    if (pid == Environment.ProcessId || killed.Contains(pid)) continue;
+
+                    try
+                    {
+                        using var target = Process.GetProcessById(pid);
+                        target.Kill(entireProcessTree: true);
+                        target.WaitForExit(2000);
+                    }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+
+        // 等文件句柄释放，否则删目录会漏文件
+        for (var i = 0; i < 10; i++)
+        {
+            Thread.Sleep(300);
+            if (!HasAppProcess(dir)) break;
+        }
+    }
+
+    /// <summary>安装目录下还有没有活着的进程。</summary>
+    private static bool HasAppProcess(string dir)
+    {
+        foreach (var name in new[] { Path.GetFileNameWithoutExtension(Program.ExeName), "python" })
+        {
+            foreach (var proc in Process.GetProcessesByName(name))
+            {
+                try
+                {
+                    var path = proc.MainModule?.FileName;
+                    if (path is not null && IsInside(dir, path)) return true;
+                }
+                catch { }
+            }
+        }
+        return false;
     }
 
     private static void RemoveShortcuts()

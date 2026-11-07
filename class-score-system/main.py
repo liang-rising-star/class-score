@@ -247,8 +247,29 @@ def read_config():
         default_config = get_default_config()
         write_config(default_config)
         return default_config
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        config = json.load(f)
+    # 兼容历史遗留：带 BOM 或被按本地代码页改过的 config 也要能读出来
+    with open(CONFIG_PATH, "rb") as f:
+        raw = f.read()
+
+    config = None
+    for enc in ("utf-8-sig", "utf-8", "gbk"):
+        try:
+            config = json.loads(raw.decode(enc))
+            break
+        except Exception:
+            continue
+
+    if config is None:
+        raise RuntimeError("config.json 无法解析，请检查文件编码")
+
+    # 系统名称如果被写坏成乱码（私用区字符 / 替换符），恢复成默认值
+    try:
+        name = config.get("system", {}).get("name") or ""
+        if any("" <= ch <= "" or ch == "�" for ch in name):
+            config.setdefault("system", {})["name"] = get_default_config()["system"]["name"]
+            write_config(config)
+    except Exception:
+        pass
 
     # 深合并且只补缺失键：老版本/手改过的 config 缺少 section 时不再 KeyError，
     # 也不会覆盖用户已设置的值（尤其 init_required=False）。
@@ -1605,7 +1626,8 @@ def _update_loop():
     time.sleep(180)
     while True:
         try:
-            payload = update_fetch()
+            # 自动检查只用正式通道；体验版由用户在弹窗里手动开启后生效
+            payload = update_fetch(beta=False)
             if not payload.get("error"):
                 update_cache(payload)
         except Exception:

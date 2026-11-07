@@ -196,7 +196,20 @@ internal sealed class TrayApplicationContext : ApplicationContext
         try
         {
             var configPath = Path.Combine(root, "class-score-system", "data", "config.json");
-            if (!File.Exists(configPath)) return;
+
+            using var key = Registry.CurrentUser.OpenSubKey(runKey, writable: true);
+            if (key is null) return;
+
+            var registered = key.GetValue(valueName) is not null;
+
+            // 首次启动（安装完还没生成 config）：把安装程序登记的注册表状态先落到配置里，
+            // 否则设置页会显示"未开启"，用户得开关两次才能关掉。
+            if (!File.Exists(configPath))
+            {
+                if (registered && SetConfigAutostart(configPath, true))
+                    AppLog.Write("autostart: 首次启动，按注册表初始化配置为开启");
+                return;
+            }
 
             var enabled = false;
             using (var doc = JsonDocument.Parse(File.ReadAllText(configPath)))
@@ -208,8 +221,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 }
             }
 
-            using var key = Registry.CurrentUser.OpenSubKey(runKey, writable: true);
-            if (key is null) return;
+            // 不一致时以注册表为准（安装程序 / 卸载程序都只动注册表）
+            if (registered && !enabled)
+            {
+                if (SetConfigAutostart(configPath, true))
+                    AppLog.Write("autostart: 注册表已启用，配置同步为开启");
+                return;
+            }
 
             if (enabled)
             {
@@ -217,7 +235,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 key.SetValue(valueName, $"\"{exe}\" --root \"{root}\" --tray");
                 AppLog.Write("autostart: 已登记开机启动");
             }
-            else if (key.GetValue(valueName) is not null)
+            else if (registered)
             {
                 key.DeleteValue(valueName, throwOnMissingValue: false);
                 AppLog.Write("autostart: 已取消开机启动");
@@ -226,6 +244,46 @@ internal sealed class TrayApplicationContext : ApplicationContext
         catch (Exception ex)
         {
             AppLog.Write("autostart failed: " + ex.Message);
+        }
+    }
+
+    /// <summary>把 config.json 里的 desktop.autostart 改成指定值，成功返回 true。</summary>
+    private static bool SetConfigAutostart(string configPath, bool value)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+
+            System.Text.Json.Nodes.JsonObject root;
+            if (File.Exists(configPath))
+            {
+                if (System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(configPath))
+                    is not System.Text.Json.Nodes.JsonObject parsed) return false;
+                root = parsed;
+            }
+            else
+            {
+                // 安装完第一次启动时还没有 config：先建一个最小骨架，
+                // 后端启动后 read_config 会把默认项补全
+                root = new System.Text.Json.Nodes.JsonObject();
+            }
+
+            if (root["desktop"] is not System.Text.Json.Nodes.JsonObject desktop)
+            {
+                desktop = new System.Text.Json.Nodes.JsonObject();
+                root["desktop"] = desktop;
+            }
+
+            desktop["autostart"] = value;
+
+            var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(configPath, json, new System.Text.UTF8Encoding(false));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("autostart sync failed: " + ex.Message);
+            return false;
         }
     }
 
