@@ -246,6 +246,18 @@ document.addEventListener('cancel', function (e) {
     var dlText = document.getElementById('updateDownloadText');
     var dlPercent = document.getElementById('updateDownloadPercent');
 
+    // 下载/安装期间禁用其它按钮，避免中途关窗导致状态错乱
+    function setBusy(busy) {
+        [applyBtn, localBtn, elClose, elRecheck].forEach(function (b) {
+            if (b) b.disabled = !!busy;
+        });
+        if (elOpen) {
+            elOpen.classList.toggle('is-disabled', !!busy);
+            elOpen.style.pointerEvents = busy ? 'none' : '';
+        }
+        if (applyBtn) applyBtn.disabled = !!busy;
+    }
+
     function hasDesktopBridge() {
         return !!(window.chrome && window.chrome.webview &&
                   window.chrome.webview.hostObjects && window.chrome.webview.hostObjects.desktopBridge);
@@ -333,8 +345,23 @@ document.addEventListener('cancel', function (e) {
     btn.addEventListener('click', function() {
         if (typeof dialog.showModal === 'function') dialog.showModal();
         if (localBtn) localBtn.hidden = !hasDesktopBridge();
+        setBusy(false);
+        resumeIfDownloading();
         check(true);          // 每次打开都联网核对，避免缓存里是旧结果
     });
+
+    // 上次没下完就关了弹窗 / 关了窗口：重新打开时接着显示进度
+    function resumeIfDownloading() {
+        fetch('/update/progress', { headers: { 'X-Requested-With': 'fetch' } })
+            .then(function (r) { return r.json(); })
+            .then(function (job) {
+                if (!job) return;
+                if (job.state === 'downloading' || job.state === 'ready') {
+                    startPolling(job);
+                }
+            })
+            .catch(function () { });
+    }
 
     elRecheck.addEventListener('click', function() { check(true); });
 
@@ -361,7 +388,7 @@ document.addEventListener('cancel', function (e) {
 
     if (applyBtn) {
         applyBtn.addEventListener('click', function () {
-            applyBtn.disabled = true;
+            setBusy(true);
             applyBtn.classList.remove('btn--new');
             elText.textContent = '正在下载更新包…';
             elMeta.hidden = true;
@@ -382,16 +409,28 @@ document.addEventListener('cancel', function (e) {
                 .then(function (res) {
                     if (!res || res.ok === false) {
                         elText.textContent = '下载失败：' + ((res && res.error) || '未知原因');
-                        applyBtn.disabled = false;
+                        setBusy(false);
                         return;
                     }
-                    pollProgress();
+                    startPolling(res);
                 })
                 .catch(function () {
                     elText.textContent = '下载失败，请稍后重试。';
-                    applyBtn.disabled = false;
+                    setBusy(false);
                 });
         });
+
+        function startPolling(job) {
+            if (dlBox) {
+                dlBox.hidden = false;
+                dlFill.style.width = (job.percent || 0) + '%';
+                dlPercent.textContent = (job.percent || 0) + '%';
+                dlText.textContent = job.state === 'ready' ? '安装完毕，正在重启程序…'
+                                                          : '正在下载更新包…';
+            }
+            setBusy(true);
+            pollProgress();
+        }
 
         function pollProgress() {
             fetch('/update/progress', { headers: { 'X-Requested-With': 'fetch' } })
@@ -423,7 +462,7 @@ document.addEventListener('cancel', function (e) {
                         bridge.ApplyUpdate(job.path).then(function (r) {
                             if (r && r !== 'ok') {
                                 dlText.textContent = '启动安装失败：' + r;
-                                applyBtn.disabled = false;
+                                setBusy(false);
                             }
                         });
                         return;
@@ -432,7 +471,7 @@ document.addEventListener('cancel', function (e) {
                     // error
                     dlText.textContent = job.error || '下载失败';
                     elText.textContent = '下载失败：' + (job.error || '未知原因');
-                    applyBtn.disabled = false;
+                    setBusy(false);
                 })
                 .catch(function () {
                     setTimeout(pollProgress, 800);

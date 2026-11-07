@@ -59,6 +59,7 @@ Get-ChildItem $target -File -Include *.pdb,*.json -ErrorAction SilentlyContinue 
 Write-Host "== 4/5 复制后端 → class-score-system\ ==" -ForegroundColor Cyan
 $excludeDirs = @(
     "data",
+    "update",          # 更新包下载目录（运行时生成，可能上百 MB）
     "__pycache__",
     "python/Lib/test",
     "python/Lib/idlelib",

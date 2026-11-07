@@ -494,6 +494,13 @@ button.side-link.is-new:hover {
     border-radius: 999px;
 }
 
+/* 下载进行中：链接按钮也要表现得像被禁用 */
+.btn.is-disabled {
+    opacity: .55;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
 /* 更新弹窗比默认弹窗宽一些，底部按钮不会挤在一起 */
 .modal.modal--update {
     width: min(620px, calc(100vw - 32px));

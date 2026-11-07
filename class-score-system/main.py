@@ -1494,6 +1494,7 @@ _update_job = {
     "path": "",
     "version": "",
     "error": "",
+    "updated_at": 0.0,       # 最后一次进度更新的时间，用来判断任务是否已经僵死
 }
 _update_job_lock = threading.Lock()
 
@@ -1607,7 +1608,11 @@ async def update_download(request: Request, csrf_token: str = Form(None)):
 
     job = _update_job_get()
     if job["state"] == "downloading":
-        return {"ok": True, "state": "downloading"}
+        idle = time.time() - (job.get("updated_at") or 0)
+        if idle < 45:
+            return {"ok": True, "state": "downloading", "resumed": True}
+        # 卡住的旧任务（下载线程已死）直接丢掉，重新开始
+        _update_job_set(state="idle", percent=0, received=0, total=0, error="")
 
     config = read_config()
     beta = bool((config.get("update", {}) or {}).get("beta", False))
@@ -1636,6 +1641,7 @@ def _update_job_get():
 def _update_job_set(**kwargs):
     with _update_job_lock:
         _update_job.update(kwargs)
+        _update_job["updated_at"] = time.time()
 
 
 def _update_download_worker(beta: bool):
