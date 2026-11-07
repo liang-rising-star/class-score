@@ -41,6 +41,70 @@ APP_VERSION = "3.0"
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 # 提供logo.ico文件访问
+UPDATE_MARK_PATH = os.path.join(BASE_DIR, "update", "last-update.json")
+
+
+@app.middleware("http")
+async def inject_update_done_toast(request, call_next):
+    """刚更新完启动时，在页面上弹一次「安装完毕」提示。"""
+    response = await call_next(request)
+
+    ctype = response.headers.get("content-type", "")
+    if "text/html" not in ctype:
+        return response
+
+    info = None
+    try:
+        if os.path.exists(UPDATE_MARK_PATH):
+            if time.time() - os.path.getmtime(UPDATE_MARK_PATH) < 900:      # 15 分钟内有效
+                with open(UPDATE_MARK_PATH, "r", encoding="utf-8") as f:
+                    info = json.load(f)
+            os.remove(UPDATE_MARK_PATH)                                     # 只提示一次
+    except Exception:
+        info = None
+
+    if not info:
+        return response
+
+    version = (info.get("version") or "").strip()
+    label = "已更新到 v" + version if version else "更新完成"
+
+    body = b""
+    async for chunk in response.body_iterator:
+        body += chunk
+
+    text = body.decode("utf-8", "ignore")
+    if "</body>" not in text:
+        return response
+
+    script = """
+<script>
+(function () {
+  function show() {
+    var box = document.createElement('div');
+    box.textContent = %s;
+    box.style.cssText = 'position:fixed;left:50%%;top:18px;transform:translateX(-50%%);' +
+      'z-index:9999;padding:10px 18px;border-radius:999px;background:#2563eb;color:#fff;' +
+      'font-size:13.5px;font-weight:600;box-shadow:0 8px 24px rgba(37,99,235,.35);' +
+      'opacity:0;transition:opacity .25s,transform .25s;font-family:inherit';
+    document.body.appendChild(box);
+    requestAnimationFrame(function () { box.style.opacity = '1'; box.style.transform = 'translateX(-50%%) translateY(4px)'; });
+    setTimeout(function () { box.style.opacity = '0'; setTimeout(function () { box.remove(); }, 300); }, 5000);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show);
+  else show();
+})();
+</script>
+""" % json.dumps(label, ensure_ascii=False)
+
+    text = text.replace("</body>", script + "</body>", 1)
+
+    from starlette.responses import HTMLResponse as _HTML
+    headers = {k: v for k, v in response.headers.items()
+               if k.lower() not in ("content-length", "content-type")}
+    return _HTML(content=text, status_code=response.status_code, headers=headers)
+
+
 @app.get("/logo.ico")
 async def get_logo():
     logo_path = os.path.join(BASE_DIR, "logo.ico")
@@ -1421,6 +1485,18 @@ UPDATE_LATEST_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest
 UPDATE_LIST_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases?per_page=10"
 UPDATE_PAGE = f"https://github.com/{UPDATE_REPO}/releases"
 
+# 下载任务的实时状态（单任务，够用）
+_update_job = {
+    "state": "idle",        # idle / downloading / ready / error
+    "percent": 0,
+    "received": 0,
+    "total": 0,
+    "path": "",
+    "version": "",
+    "error": "",
+}
+_update_job_lock = threading.Lock()
+
 
 def _version_tuple(text):
     """把 "v3.1.0" / "3.1" 转成等长元组，3.0 与 3.0.0 视为同一版本。"""
@@ -1523,57 +1599,98 @@ def update_check(request: Request):
 
 @app.post("/update/download")
 async def update_download(request: Request, csrf_token: str = Form(None)):
-    """把 release 里的 update.zip 下到 class-score-system/update/ 下，返回本地路径。"""
+    """启动后台下载（带进度），前端轮询 /update/progress。"""
     check_csrf(request, csrf_token)
     sid, sess = get_session(request)
     if not sess:
         raise HTTPException(status_code=403, detail="请先登录")
 
+    job = _update_job_get()
+    if job["state"] == "downloading":
+        return {"ok": True, "state": "downloading"}
+
     config = read_config()
     beta = bool((config.get("update", {}) or {}).get("beta", False))
 
+    _update_job_set(state="downloading", percent=0, received=0, total=0,
+                    path="", version="", error="")
+    threading.Thread(target=_update_download_worker, args=(beta,), daemon=True,
+                     name="update-download").start()
+    return {"ok": True, "state": "downloading"}
+
+
+@app.get("/update/progress")
+def update_progress(request: Request):
+    """下载进度：state = downloading / ready / error。"""
+    sid, sess = get_session(request)
+    if not sess:
+        raise HTTPException(status_code=403, detail="请先登录")
+    return _update_job_get()
+
+
+def _update_job_get():
+    with _update_job_lock:
+        return dict(_update_job)
+
+
+def _update_job_set(**kwargs):
+    with _update_job_lock:
+        _update_job.update(kwargs)
+
+
+def _update_download_worker(beta: bool):
+    """后台线程：挑资产 → 下载到 class-score-system/update/update.zip → 上报进度。"""
+    _update_job_set(state="downloading", percent=0, received=0, total=0,
+                    path="", version="", error="")
     try:
         data = _pick_release(beta)
-    except Exception as exc:
-        return {"ok": False, "error": f"读取发布信息失败（{exc.__class__.__name__}）"}
 
-    # 只要文件名里带 update、并且是 zip，就算更新包（允许带版本号，如 update-3.1.0.zip）
-    assets = data.get("assets") or []
-    asset = None
-    for item in assets:
-        name = (item.get("name") or "").lower()
-        if name.endswith(".zip") and "update" in name:
-            asset = item
-            break
+        # 只要文件名里带 update、并且是 zip，就算更新包（允许带版本号）
+        asset = None
+        for item in (data.get("assets") or []):
+            name = (item.get("name") or "").lower()
+            if name.endswith(".zip") and "update" in name:
+                asset = item
+                break
 
-    if asset is None:
-        return {"ok": False, "error": "这个版本没有提供更新包（文件名需包含 update 且以 .zip 结尾）"}
+        if asset is None:
+            _update_job_set(state="error",
+                            error="这个版本没有提供更新包（文件名需包含 update 且以 .zip 结尾）")
+            return
 
-    url = asset.get("browser_download_url")
-    if not url:
-        return {"ok": False, "error": "更新包地址无效"}
+        url = asset.get("browser_download_url")
+        if not url:
+            _update_job_set(state="error", error="更新包地址无效")
+            return
 
-    target_dir = os.path.join(BASE_DIR, "update")
-    os.makedirs(target_dir, exist_ok=True)
-    target_name = os.path.basename(asset.get("name") or "update.zip")
-    target = os.path.join(target_dir, "update.zip")
-    result_name = target_name
+        target_dir = os.path.join(BASE_DIR, "update")
+        os.makedirs(target_dir, exist_ok=True)
+        target = os.path.join(target_dir, "update.zip")
+        temp = target + ".part"
 
-    try:
         import urllib.request as _url
         req = _url.Request(url, headers={"User-Agent": f"class-score/{APP_VERSION}"})
-        with _url.urlopen(req, timeout=60) as resp, open(target, "wb") as f:
-            while True:
-                chunk = resp.read(256 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-    except Exception as exc:
-        return {"ok": False, "error": f"下载失败（{exc.__class__.__name__}）"}
 
-    size = os.path.getsize(target)
-    return {"ok": True, "path": target, "size": size, "asset": result_name,
-            "version": (data.get("tag_name") or "").lstrip("vV")}
+        with _url.urlopen(req, timeout=60) as resp:
+            total = int(resp.headers.get("content-length") or 0)
+            _update_job_set(total=total, received=0, percent=0)
+
+            received = 0
+            with open(temp, "wb") as f:
+                while True:
+                    chunk = resp.read(256 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    received += len(chunk)
+                    percent = int(received * 100 / total) if total else 0
+                    _update_job_set(received=received, percent=min(percent, 99))
+
+        os.replace(temp, target)
+        _update_job_set(state="ready", percent=100, path=target,
+                        version=(data.get("tag_name") or "").lstrip("vV"))
+    except Exception as exc:
+        _update_job_set(state="error", error=f"下载失败（{exc.__class__.__name__}）")
 
 
 @app.get("/update/status")

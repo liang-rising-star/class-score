@@ -195,6 +195,14 @@
 
         <div class="update-meta" id="updateMeta" hidden></div>
 
+        <div class="update-download" id="updateDownload" hidden>
+            <div class="update-download__bar"><span id="updateDownloadFill"></span></div>
+            <div class="update-download__meta">
+                <span id="updateDownloadText">正在准备下载…</span>
+                <span id="updateDownloadPercent">0%</span>
+            </div>
+        </div>
+
         <div class="update-notes-wrap" id="updateNotesWrap" hidden>
             <div class="update-notes__title">更新内容</div>
             <pre class="update-notes" id="updateNotes"></pre>
@@ -233,6 +241,10 @@
     var localBtn = document.getElementById('updateLocal');
     var menuText = document.getElementById('checkUpdateText');
     var notesWrap = document.getElementById('updateNotesWrap');
+    var dlBox = document.getElementById('updateDownload');
+    var dlFill = document.getElementById('updateDownloadFill');
+    var dlText = document.getElementById('updateDownloadText');
+    var dlPercent = document.getElementById('updateDownloadPercent');
 
     function hasDesktopBridge() {
         return !!(window.chrome && window.chrome.webview &&
@@ -296,6 +308,7 @@
 
     function check(force) {
         elText.textContent = '正在连接 GitHub 检查最新版本…';
+        if (dlBox) dlBox.hidden = true;
         elMeta.hidden = true;
         if (notesWrap) notesWrap.hidden = true;
         elOpen.hidden = true;
@@ -354,31 +367,77 @@
             elMeta.hidden = true;
             if (notesWrap) notesWrap.hidden = true;
 
+            if (dlBox) {
+                dlBox.hidden = false;
+                dlFill.style.width = '0%';
+                dlText.textContent = '正在连接更新服务器…';
+                dlPercent.textContent = '0%';
+            }
+
             var form = new URLSearchParams();
             form.set('csrf_token', csrf);
 
             fetch('/update/download', { method: 'POST', body: form })
                 .then(function (r) { return r.json(); })
                 .then(function (res) {
-                    if (!res.ok) {
-                        elText.textContent = '下载失败：' + (res.error || '未知原因');
+                    if (!res || res.ok === false) {
+                        elText.textContent = '下载失败：' + ((res && res.error) || '未知原因');
                         applyBtn.disabled = false;
                         return;
                     }
-                    elText.textContent = '下载完成，正在重新启动程序…';
-                    var bridge = window.chrome.webview.hostObjects.desktopBridge;
-                    bridge.ApplyUpdate(res.path).then(function (r) {
-                        if (r && r !== 'ok') {
-                            elText.textContent = '启动更新失败：' + r;
-                            applyBtn.disabled = false;
-                        }
-                    });
+                    pollProgress();
                 })
                 .catch(function () {
                     elText.textContent = '下载失败，请稍后重试。';
                     applyBtn.disabled = false;
                 });
         });
+
+        function pollProgress() {
+            fetch('/update/progress', { headers: { 'X-Requested-With': 'fetch' } })
+                .then(function (r) { return r.json(); })
+                .then(function (job) {
+                    if (!job) return;
+
+                    if (job.state === 'downloading') {
+                        var pct = job.percent || 0;
+                        dlFill.style.width = pct + '%';
+                        dlPercent.textContent = pct + '%';
+                        if (job.total) {
+                            var got = (job.received / 1048576).toFixed(1);
+                            var all = (job.total / 1048576).toFixed(1);
+                            dlText.textContent = '正在下载更新包 ' + got + ' / ' + all + ' MB';
+                        } else {
+                            dlText.textContent = '正在下载更新包…';
+                        }
+                        setTimeout(pollProgress, 400);
+                        return;
+                    }
+
+                    if (job.state === 'ready') {
+                        dlFill.style.width = '100%';
+                        dlPercent.textContent = '100%';
+                        dlText.textContent = '安装完毕，正在重启程序…';
+                        elText.textContent = '正在安装更新…';
+                        var bridge = window.chrome.webview.hostObjects.desktopBridge;
+                        bridge.ApplyUpdate(job.path).then(function (r) {
+                            if (r && r !== 'ok') {
+                                dlText.textContent = '启动安装失败：' + r;
+                                applyBtn.disabled = false;
+                            }
+                        });
+                        return;
+                    }
+
+                    // error
+                    dlText.textContent = job.error || '下载失败';
+                    elText.textContent = '下载失败：' + (job.error || '未知原因');
+                    applyBtn.disabled = false;
+                })
+                .catch(function () {
+                    setTimeout(pollProgress, 800);
+                });
+        }
     }
     elClose.addEventListener('click', function() { dialog.close(); });
     dialog.addEventListener('click', function(e) { if (e.target === dialog) dialog.close(); });

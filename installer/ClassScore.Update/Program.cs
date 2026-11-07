@@ -139,6 +139,17 @@ internal static class Program
         // 更新目录始终保留
         Directory.CreateDirectory(Path.Combine(_dir, "class-score-system", "update"));
 
+        // 写一个标记：新版本启动后弹一次「安装完毕」
+        try
+        {
+            var version = ReadAppVersion(Path.Combine(_dir, "class-score-system", "main.py"));
+            var mark = Path.Combine(_dir, "class-score-system", "update", "last-update.json");
+            var json = "{\"version\":\"" + version + "\",\"ts\":" +
+                       DateTimeOffset.UtcNow.ToUnixTimeSeconds() + "}";
+            File.WriteAllText(mark, json, new System.Text.UTF8Encoding(false));
+        }
+        catch { }
+
         // 清理 7 天前的更新包
         try
         {
@@ -275,6 +286,23 @@ internal static class Program
             Thread.Sleep(300);
             if (!AnyAlive()) break;
         }
+    }
+
+    /// <summary>从 main.py 里读 APP_VERSION，用来写更新标记。</summary>
+    private static string ReadAppVersion(string mainPy)
+    {
+        try
+        {
+            if (!File.Exists(mainPy)) return "";
+            foreach (var line in File.ReadLines(mainPy))
+            {
+                if (!line.TrimStart().StartsWith("APP_VERSION")) continue;
+                var parts = line.Split('"');
+                if (parts.Length >= 2) return parts[1];
+            }
+        }
+        catch { }
+        return "";
     }
 
     private static void StartApp()

@@ -616,6 +616,47 @@ button.side-link.is-new:hover {
     margin: 0 0 14px;
 }
 
+/* 下载进度条 */
+.update-download {
+    margin: 4px 0 14px;
+    padding: 14px 16px;
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.update-download__bar {
+    height: 8px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+}
+
+.update-download__bar span {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #2563eb, #6366f1, #06b6d4);
+    transition: width .25s ease;
+}
+
+.update-download__meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-top: 9px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
+.update-download__meta span:last-child {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--primary-dark);
+}
+
 .update-notes-wrap {
     margin: 4px 0 0;
     padding: 14px 16px;
