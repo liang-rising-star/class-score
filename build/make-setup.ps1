@@ -17,6 +17,7 @@ $dist = Join-Path $root "dist"
 $appDir = Join-Path $dist "class-score"
 $setupDir = Join-Path $root "installer\ClassScore.Setup"
 $payload = Join-Path $setupDir "payload.zip"
+$outDir = Join-Path $dist "setup-out"
 
 Write-Host "== 1/3 准备应用目录 ==" -ForegroundColor Cyan
 if (-not $SkipPackage -or -not (Test-Path (Join-Path $appDir "class-score.exe"))) {
@@ -62,29 +63,30 @@ Write-Host "   载荷大小：$mb MB" -ForegroundColor Green
 Write-Host "== 3/3 编译安装程序 ==" -ForegroundColor Cyan
 Push-Location $setupDir
 try {
-    dotnet publish ClassScore.Setup.csproj -c $Configuration -r win-x64 -o (Join-Path $dist "class-score-setup") | Out-Host
+    dotnet publish ClassScore.Setup.csproj -c $Configuration -r win-x64 -o $outDir | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "安装程序编译失败" }
 } finally {
     Pop-Location
 }
 
-$outDir = Join-Path $dist "class-score-setup"
 $produced = Join-Path $outDir "class-score-setup.exe"
 if (-not (Test-Path $produced)) { throw "没有生成 class-score-setup.exe" }
 
 Remove-Item $payload -Force -ErrorAction SilentlyContinue
 
-$setupExe = $produced
+# 单文件产物：把 exe 挪到 dist 根目录，删掉中间目录
+$setupExe = Join-Path $dist "class-score-setup.exe"
+if (Test-Path $setupExe) { Remove-Item $setupExe -Force }
+Move-Item $produced $setupExe -Force
+Remove-Item $outDir -Recurse -Force -ErrorAction SilentlyContinue
 $sizeMb = [math]::Round((Get-Item $setupExe).Length / 1MB, 1)
 
 # 受控/沙箱环境写出来的文件会带 Low 完整性标签，双击没反应。
 # 检测到就自动复制一份到桌面（复制后归一化 ACL），并提示从那里运行。
 $label = (& icacls $setupExe 2>$null) -join " "
 if ($label -match "Low Mandatory") {
-    $desktopDir = Join-Path ([Environment]::GetFolderPath("Desktop")) "class-score-setup"
-    if (Test-Path $desktopDir) { Remove-Item $desktopDir -Recurse -Force }
-    Copy-Item $outDir $desktopDir -Recurse -Force
-    $desktopCopy = Join-Path $desktopDir "class-score-setup.exe"
+    $desktopCopy = Join-Path ([Environment]::GetFolderPath("Desktop")) "class-score-setup.exe"
+    Copy-Item $setupExe $desktopCopy -Force
     Write-Host ""
     Write-Host "!! 产物带 Low 完整性标签（本环境特有），双击无反应。" -ForegroundColor Yellow
     Write-Host "   已自动复制一份到桌面，请从以下路径运行：" -ForegroundColor Yellow
@@ -92,4 +94,4 @@ if ($label -match "Low Mandatory") {
 }
 
 Write-Host ""
-Write-Host "完成：$outDir\class-score-setup.exe（$sizeMb MB，需整目录一起分发）" -ForegroundColor Green
+Write-Host "完成：$setupExe（$sizeMb MB，单文件）" -ForegroundColor Green

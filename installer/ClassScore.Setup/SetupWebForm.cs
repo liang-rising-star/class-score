@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
@@ -26,11 +28,12 @@ public sealed class SetupWebForm : Form
         Font = new Font("Microsoft YaHei UI", 9.5f);
         AutoScaleMode = AutoScaleMode.Dpi;
 
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "logo.ico");
-        if (File.Exists(iconPath))
+        try
         {
-            try { Icon = new Icon(iconPath); } catch { }
+            using var stream = EmbeddedUi.OpenResource("res.logo.ico");
+            if (stream is not null) Icon = new Icon(stream);
         }
+        catch { }
 
         _bridge = new InstallerBridge(this);
 
@@ -109,12 +112,8 @@ public sealed class SetupWebForm : Form
 
         try
         {
-            var iconPath = Path.Combine(AppContext.BaseDirectory, "logo.ico");
-            if (File.Exists(iconPath))
-            {
-                using var icon = new Icon(iconPath);
-                logo.Image = icon.ToBitmap();
-            }
+            var image = EmbeddedUi.LoadLogoImage();
+            if (image is not null) logo.Image = image;
         }
         catch { }
 
@@ -183,11 +182,6 @@ public sealed class SetupWebForm : Form
             settings.IsStatusBarEnabled = false;
             settings.IsZoomControlEnabled = false;
 
-            // 把 wwwroot 映射成 https://installer.local/，避免用 file:// 的各种限制
-            var wwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-            _web.CoreWebView2.SetVirtualHostNameToFolderMapping(
-                "installer.local", wwwroot, CoreWebView2HostResourceAccessKind.Allow);
-
             _web.CoreWebView2.AddHostObjectToScript("installer", _bridge);
 
             _web.CoreWebView2.NavigationCompleted += (_, _) =>
@@ -199,7 +193,7 @@ public sealed class SetupWebForm : Form
                 }
             };
 
-            _web.CoreWebView2.Navigate("https://installer.local/index.html");
+            _web.CoreWebView2.NavigateToString(EmbeddedUi.BuildHtml());
         }
         catch (Exception ex)
         {
@@ -390,5 +384,54 @@ public class InstallerBridge
     public void CloseSetup()
     {
         _form.BeginInvoke(new Action(() => _form.Close()));
+    }
+}
+
+/// <summary>把内嵌的 HTML/CSS/JS/图标拼成自包含页面（单文件 exe 里没有 wwwroot 目录）。</summary>
+internal static class EmbeddedUi
+{
+    private static Assembly Asm => Assembly.GetExecutingAssembly();
+
+    public static Stream? OpenResource(string name) => Asm.GetManifestResourceStream(name);
+
+    public static string ReadText(string name)
+    {
+        using var stream = OpenResource(name) ?? throw new InvalidOperationException("缺少界面资源：" + name);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+
+    public static Image? LoadLogoImage()
+    {
+        using var stream = OpenResource("ui.logo.ico");
+        if (stream is null) return null;
+        using var icon = new Icon(stream);
+        return icon.ToBitmap();
+    }
+
+    public static string BuildHtml()
+    {
+        var html = ReadText("ui.index.html");
+        var appCss = ReadText("ui.app.css");
+        var wizardCss = ReadText("ui.wizard.css");
+        var script = ReadText("ui.wizard.js");
+        var logoData = ToDataUri("ui.logo.ico");
+
+        html = html.Replace("<link rel=\"stylesheet\" href=\"app.css\">", "<style>" + appCss + "</style>");
+        html = html.Replace("<link rel=\"stylesheet\" href=\"wizard.css\">", "<style>" + wizardCss + "</style>");
+        html = html.Replace("<script src=\"wizard.js\"></script>", "<script>" + script + "</script>");
+        html = html.Replace("src=\"logo.ico\"", "src=\"" + logoData + "\"");
+
+        return html;
+    }
+
+    private static string ToDataUri(string resource)
+    {
+        using var stream = OpenResource(resource);
+        if (stream is null) return string.Empty;
+
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return "data:image/x-icon;base64," + Convert.ToBase64String(buffer.ToArray());
     }
 }
