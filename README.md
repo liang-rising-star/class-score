@@ -31,9 +31,43 @@
 - 🐳 **Docker 一键部署** — 一行命令启动，数据自动持久化
 - 🎨 **简洁中文界面** — 全中文响应式 UI，专注教育场景
 
+## 🆕 3.0 有什么新东西
+
+| 能力 | 说明 |
+|---|---|
+| 🖥️ **桌面托盘常驻** | 窗口关掉只是收进托盘，双击图标回来；托盘菜单可重启系统 / 退出 |
+| 🎬 **启动动画** | 登录后可播放过场动画，支持「每次 / 每天一次 / 关闭」三档 |
+| 🔔 **核销提示音** | 成功/失败各 12 / 8 种预设音效，可选自定义音频 |
+| 🖨️ **静默直打** | 桌面版自己渲染 A4 并送打印机，不弹 WPS/Word |
+| 🔄 **检查更新** | 侧边栏一键对比 GitHub Release，正式 / 体验双通道，支持一键下载安装 |
+| 📦 **自建安装包** | 单文件 exe，自带 .NET 运行时与后端整套文件，装到普通目录即可用 |
+| 🗑️ **独立卸载程序** | 安装目录里的 `uninstall.exe`，注册进系统「应用」列表，可选保留成绩数据 |
+| 🧩 **开机自启同步** | 安装器勾选自启动后，设置页状态与注册表保持一致 |
+
 ## 🚀 快速开始
 
-### 方式一：Docker 部署（推荐）
+### 方式一：安装包（推荐，Windows）
+
+下载 `class-score-setup.exe`（单文件，自带 .NET 运行时与后端），双击安装：
+
+```
+安装位置：默认 D:\class-score（建议别装进 C:\Program Files，那里没有写入权限）
+可选：开机自启 / 桌面快捷方式 / 开始菜单
+```
+
+装完目录结构：
+
+```
+D:\class-score├── class-score.exe        # 启动器（双击它）
+├── update.exe             # 更新程序（由「检查更新」自动拉起）
+├── uninstall.exe          # 卸载程序（也注册进系统「应用」列表）
+├── desktop\               # 桌面外壳（WebView2）
+└── class-score-system\    # 后端 + 内置 Python + data```
+
+> 只需要 WebView2 运行时（Win10/11 一般自带；缺失时程序会提示并给出官方下载链接）。
+> 想装到别的盘也行，路径别含空格和中文以外的特殊字符即可。
+
+### 方式二：Docker 部署
 
 #### Docker 镜像版本
 
@@ -65,7 +99,7 @@ services:
     restart: unless-stopped
 ```
 
-### 方式二：本地运行
+### 方式三：本地运行
 #### 使用本机Python运行服务
 ```bash
 cd class-score-system
@@ -77,26 +111,26 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Windows 用户可直接双击 `启动.bat` 或 `run.exe`（内置 Python 运行时，无需安装 Python）。
+Windows 用户也可以直接用打包好的安装程序（见下方「方式一：安装包（推荐）」），
+不需要自己装 Python；旧版的 `启动.bat` / `run.exe` 已在 3.0 移除。
 
-### 方式三：桌面应用（WebView2，托盘常驻）
+### 方式四：源码方式运行桌面版（WebView2，托盘常驻）
 
 `desktop/` 是一个 C# WinForms 外壳，用 **WebView2** 内嵌网页，并自动拉起内嵌 Python 后端（固定端口 **3445**）。
 
-```bash
+```powershell
 # 需要 .NET SDK 8+ 与 WebView2 运行时（Win10/11 通常已自带）
 cd desktop
 dotnet build -c Release
 
-# 推荐用启动器运行：会把产物复制到 %LOCALAPPDATA%\ClassScore-Desktoppp 再启动
-启动桌面版.bat
-# 也可直接跑产物：desktop/bin/Release/net8.0-windows/ClassScore.Desktop.exe
+# 直接运行（用 --root 指定项目根目录）
+.\bin\Release\net8.0-windows\class-score.exe --root "D:\class-score"
 ```
 
-> 💡 为什么推荐启动器：直接在工作区/只读位置运行 exe 时，进程可能继承受限的完整性级别，
+> 💡 建议用 `build\package.ps1` 出完整包再运行 `dist\class-score\class-score.exe`：
+> 直接在工作区/只读位置运行 exe 时，进程可能继承受限的完整性级别，
 > WebView2 会因无法写入下载目录而提示“没有权限，请保存到文档文件夹”。
-> 复制到 `%LOCALAPPDATA%` 后进程拥有正常权限。若坚持原地运行，可用管理员命令行修正：
-> `icacls "desktopin" /setintegritylevel (OI)(CI)Medium /T`
+> 必要时可用管理员命令行修正：`icacls "desktop\bin" /setintegritylevel (OI)(CI)Medium /T`
 
 用法：
 
@@ -135,19 +169,64 @@ cd class-score-system
 ./python/python.exe run.py --port 8080
 ```
 
-#### 修改运行.bat
+3.0 已移除 `启动.bat`：桌面版固定监听 `127.0.0.1:3445`，
+需要换端口请直接用 Python 命令启动 `python\python.exe run.py --port 8080`。
 
-要修改 `启动.bat` 文件以使用自定义端口，可按照以下步骤操作：
+## 🔄 检查更新与自动更新
 
-1. 用文本编辑器打开 `启动.bat` 文件
-2. 修改其中的端口参数，例如：
-   ```batch
-   @echo off
-   cd class-score-system
-   .\python\python.exe run.py --port 8080
-   pause
-   ```
-3. 保存文件后双击运行，服务将在指定端口启动
+侧边栏「检查更新」会读取 GitHub 仓库的 Release 并与当前版本比对。
+
+| 通道 | 数据来源 | 说明 |
+|---|---|---|
+| 正式 | `releases/latest` | 只认非预发布版本 |
+| 体验版 | `releases` 列表第一条 | 弹窗里手动打开「加入体验测试版」后生效 |
+
+更新流程：
+
+```
+检查到新版本 → 点「立即更新」
+   → 从 Release 资产里找文件名含 update 且以 .zip 结尾的包
+   → 下载到 class-score-system\update\update.zip
+   → 启动 update.exe，主程序退出
+   → update.exe 等进程结束、备份 data、删旧目录、解压新包、还原 data、重启
+```
+
+也可以点「选择更新包…」直接导入本地 zip（会先复制到同一位置，再走上面的流程）。
+
+> 发版要求：Release 里上传的 zip 文件名必须包含 `update`（例如 `class-score-update-3.1.0.zip`），
+> 解压后根目录应当是 `class-score.exe` + `class-score-system\` + `desktop\`。
+> 后台每小时自动检查一次，且只用**正式通道**；体验版只在手动检查时生效。
+
+## 🗑️ 卸载
+
+- 系统「设置 → 应用 → 已安装的应用 → 班级积分管理系统 → 卸载」
+- 或直接运行安装目录下的 `uninstall.exe`
+- 或命令行 `uninstall.exe --silent`（无界面）
+
+弹窗里可以勾选「保留成绩数据」：
+
+| 选择 | 结果 |
+|---|---|
+| 勾选保留 | 只删程序文件与快捷方式，`class-score-system\data` 保留 |
+| 不勾选（默认） | 整个安装目录删除，包括数据库与备份 |
+
+卸载会先结束主程序与后端 python，再清理快捷方式、开机自启、注册表，最后删目录。
+
+## 🏗️ 构建与打包
+
+```powershell
+# 1. 应用本体 → dist\class-score\（自包含 .NET + 内置 Python + 卸载/更新程序）
+powershell -ExecutionPolicy Bypass -File build\package.ps1
+
+# 2. 单文件安装包 → dist\class-score-setup.exe
+powershell -ExecutionPolicy Bypass -File build\make-setup.ps1
+```
+
+`build\make-setup.ps1` 会依次编译卸载程序（AOT 单文件）、更新程序（AOT 单文件），
+把应用目录压成 `payload.zip` 内嵌进安装器，最终产出一个自带 .NET 运行时的单文件 exe。
+
+> 打包脚本会自检桌面程序是否为「自包含」发布（`runtimeconfig` 里要有 `includedFrameworks`），
+> 否则装到没装 .NET 的电脑上会提示缺少 .NET。
 
 ## ⚠️ 注意事项
 
@@ -255,6 +334,14 @@ data/
 ## 📁 项目结构
 
 ```
+launcher/                 # 原生 AOT 启动器（dist 根目录的 class-score.exe）
+installer/
+├── ClassScore.Setup/      # 自建安装程序（WebView2 向导，输出单文件 exe）
+├── ClassScore.Uninstall/  # 独立卸载程序（单文件，支持保留数据）
+└── ClassScore.Update/     # 独立更新程序（AOT，校验后替换目录）
+build/
+├── package.ps1            # 打应用包
+└── make-setup.ps1         # 打单文件安装包
 class-score-system/       # Web 后端与前端模板
 ├── main.py              # 核心应用（FastAPI 路由 + 业务逻辑）
 ├── run.py               # 启动入口（支持 --reset 参数）
@@ -294,7 +381,7 @@ desktop/                  # 桌面外壳（C# WinForms + WebView2，托盘常驻
 | 安装盐 | 每个实例独立加密盐，重置后旧卡全部失效 |
 | 口令存储 | PBKDF2-SHA256（20 万轮加盐），旧版明文口令登录时自动升级 |
 | 会话管理 | 64 字符随机 Session ID + HTTP-only Cookie，空闲 8 小时过期 |
-| CSRF | 双提交令牌，所有 POST 表单校验，缺失即 403 |
+| CSRF | 双提交令牌，所有 POST（含 `/update/download`）校验，缺失即 403 |
 | 登录节流 | 同一 IP 连续 5 次失败锁定 5 分钟 |
 | 核销防双花 | 条件更新（`WHERE status='未使用'`）+ rowcount 判定，同一张卡只能核销一次 |
 | 文件保护 | 中间件拦截敏感路径；下载仅限导出目录内的 `.docx`，拒绝路径穿越 |
