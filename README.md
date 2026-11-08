@@ -14,6 +14,12 @@
 
 ---
 
+> [!IMPORTANT]
+> 📦 **本项目即将归档**：后续开发将合并至 [class-manager](https://github.com/liang-rising-star/class-manager) 项目，本仓库将不再单独维护。
+> 新的 Issue / PR 请提交到 [class-manager](https://github.com/liang-rising-star/class-manager/issues)。
+
+---
+
 ## 📋 项目简介
 
 班级积分管理系统是一款专为教育场景设计的积分卡管理工具，旨在解决传统积分卡容易伪造、难以管理的问题。
