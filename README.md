@@ -13,7 +13,6 @@
 </div>
 
 ---
->  **了解使用方式，请跳过此处，往下翻**
 
 ## 📋 项目简介
 
@@ -46,34 +45,43 @@
 
 ## 🚀 快速开始
 
+系统提供四种使用方式，按需选择：
+
+| 方式 | 适合谁 |
+|---|---|
+| [安装包](#方式一安装包推荐windows) | Windows 单机使用（推荐） |
+| [Docker](#方式二docker-部署) | 服务器 / NAS / 局域网多人使用 |
+| [本机 Python](#方式三本地运行web-模式) | 开发调试，或不想装任何打包产物 |
+| [源码运行桌面版](#方式四源码方式运行桌面版webview2托盘常驻) | 参与桌面端开发 |
+
 ### 方式一：安装包（推荐，Windows）
 
 下载 `class-score-setup.exe`（单文件，自带 .NET 运行时与后端），双击安装：
 
-```
-安装位置：默认 D:\class-score（建议别装进 C:\Program Files，那里没有写入权限）
-可选：开机自启 / 桌面快捷方式 / 开始菜单
-```
+- **安装位置**：默认 `D:\class-score`（建议别装进 `C:\Program Files`，那里没有写入权限）
+- **可选组件**：开机自启 / 桌面快捷方式 / 开始菜单
 
 装完目录结构：
 
 ```
-D:\class-score├── class-score.exe        # 启动器（双击它）
+D:\class-score
+├── class-score.exe        # 启动器（双击它）
 ├── update.exe             # 更新程序（由「检查更新」自动拉起）
 ├── uninstall.exe          # 卸载程序（也注册进系统「应用」列表）
 ├── desktop\               # 桌面外壳（WebView2）
-└── class-score-system\    # 后端 + 内置 Python + data```
+└── class-score-system\    # 后端 + 内置 Python + data
+```
 
 > 只需要 WebView2 运行时（Win10/11 一般自带；缺失时程序会提示并给出官方下载链接）。
 > 想装到别的盘也行，路径别含空格和中文以外的特殊字符即可。
 
 ### 方式二：Docker 部署
 
-#### Docker 镜像版本
+#### 镜像版本
 
 | 版本标签 | 架构 | 说明 |
 |:---:|:---:|:---|
-| `latest` | x86 | 最新版本 |
+| `latest` | x86 | 最新版本（当前 3.0） |
 | `2.0` | x86 | 稳定版本 2.0 |
 | `1.0` | x86 | 稳定版本 1.0 |
 | - | ARM | 暂未构建（后续有计划） |
@@ -99,20 +107,48 @@ services:
     restart: unless-stopped
 ```
 
-### 方式三：本地运行
-#### 使用本机Python运行服务
+### 方式三：本地运行（Web 模式）
+
+用本机 Python 直接跑后端，浏览器访问 `http://localhost:8000`：
+
 ```bash
 cd class-score-system
 
 # 安装依赖
 pip install -r requirements.txt
 
-# 启动服务
+# 启动服务（默认 8000 端口，可用 --port 换端口）
 python run.py
+python run.py --port 8080
+
+# 开发时可加热重载
+python run.py --dev
+
+# 恢复出厂设置
+python run.py --reset
 ```
 
-Windows 用户也可以直接用打包好的安装程序（见下方「方式一：安装包（推荐）」），
+> ⚠️ 启动后会占用一个命令行窗口，**请勿关闭**，关闭后服务将停止运行。
+
+Windows 用户也可以直接用打包好的安装程序（见「[方式一](#方式一安装包推荐windows)」），
 不需要自己装 Python；旧版的 `启动.bat` / `run.exe` 已在 3.0 移除。
+
+#### 使用软件包内置 Python 运行时
+
+如果不想在本机装 Python，可以用 `class-score-system/python/` 里自带的运行时：
+
+```bash
+cd class-score-system
+
+# 使用内置 Python 运行时并指定端口（例如 8080）
+./python/python.exe run.py --port 8080
+```
+
+> ⚠️ **关于内置 Python 运行时**：`class-score-system/python/`（约 430MB）不纳入版本管理。
+> 从仓库克隆后，需要把 [Python 3.14 Windows embeddable 包](https://www.python.org/downloads/windows/)
+> 解压到 `class-score-system/python/`，再用 [get-pip.py](https://bootstrap.pypa.io/get-pip.py) 装好 pip
+> 并执行 `python\python.exe -m pip install -r requirements.txt`；或者干脆用本机 Python 运行（见上文）。
+> 用 PyInstaller / Inno Setup 打便携包时，这个目录必须存在。
 
 ### 方式四：源码方式运行桌面版（WebView2，托盘常驻）
 
@@ -146,31 +182,9 @@ dotnet build -c Release
 - 导出文件走系统「另存为」对话框，自己选保存位置
 - 运行时日志：`%LOCALAPPDATA%\ClassScore-Desktop\desktop.log`（后端启动失败时会写明原因）
 
-> ⚠️ 桌面端只监听 `127.0.0.1:3445`，不对外网开放；需要局域网访问请用「方式二」的 Web 模式。
+> ⚠️ 桌面端只监听 `127.0.0.1:3445`，不对外网开放；需要局域网访问请用「[方式二](#方式二docker-部署)」的 Web 模式。
 > 若双击后提示"后端服务未能启动"，多半是 exe 所在目录不可写（例如被安全软件或沙箱限制了写入），
 > 把整个程序目录放到普通路径（如 `D:\class-score`）或以管理员身份运行即可。
-
-
-> ⚠️ **关于内置 Python 运行时**：`class-score-system/python/`（约 430MB）不纳入版本管理。
-> 从仓库克隆后，需要把 [Python 3.14 Windows embeddable 包](https://www.python.org/downloads/windows/)
-> 解压到 `class-score-system/python/`，再用 [get-pip.py](https://bootstrap.pypa.io/get-pip.py) 装好 pip
-> 并执行 `python\python.exe -m pip install -r requirements.txt`；或者干脆用本机 Python 运行（见上一节）。
-> 用 PyInstaller / Inno Setup 打便携包时，这个目录必须存在。
-
-#### 使用软件包内置 Python 运行时
-
-如果使用内置 Python 运行时，可通过以下指令自定义端口：
-
-```bash
-# 切换到 class-score-system 目录
-cd class-score-system
-
-# 使用内置 Python 运行时并指定端口（例如 8080）
-./python/python.exe run.py --port 8080
-```
-
-3.0 已移除 `启动.bat`：桌面版固定监听 `127.0.0.1:3445`，
-需要换端口请直接用 Python 命令启动 `python\python.exe run.py --port 8080`。
 
 ## 🔄 检查更新与自动更新
 
@@ -246,8 +260,10 @@ powershell -ExecutionPolicy Bypass -File build\make-setup.ps1
 ```
 data/
 ├── config.json      # 系统配置
+├── history.json     # 待处理批次（未打印/未保存的生成记录）
 ├── db/
 │   └── scores.db    # SQLite 数据库
+├── backups/         # 手动/定时备份的 zip
 └── output/          # 导出的 Word 文档
 ```
 
@@ -279,28 +295,27 @@ data/
 
 ### 2️⃣ 生成积分
 
-生成后如果没打印也没保存就关掉页面，这一批不会丢：它会留在下方的「待处理批次」里
-（数据存在 `data/history.json`），随时可以回来对它执行 **打印 / 保存 / 删除**。
-打印或保存过的批次会自动从列表中消失，删除则会连同导出的 docx 一起清掉。卡
-
 1. 登录后点击「生成积分」
 2. 填写班级名称、积分卡标题、单张面额、生成数量
 3. 点击生成 → 弹出另存为，选择保存位置
 4. 打印文档，裁剪分发
 
+生成后如果没打印也没保存就关掉页面，这一批不会丢：它会留在下方的「待处理批次」里
+（数据存在 `data/history.json`），随时可以回来对它执行 **打印 / 保存 / 删除**。
+打印或保存过的批次会自动从列表中消失，删除则会连同导出的 docx 一起清掉。
+
 ### 3️⃣ 核销积分
+
+1. 点击「核销积分」
+2. 输入积分卡编号（一行一个，或空格分隔）
+3. 也可使用条码扫描枪直接扫描
+4. 查看核销结果与总额统计
 
 核销页有两个模式：
 
 - **单个核销**（默认）——扫码枪扫一下会自动回车提交，核销成功变绿、失败变红并播放提示音，
   结果逐条向下累加，底部实时统计成功张数、失败张数与合计面额
 - **批量核销** —— 一次粘贴或扫入多行编码，提交后统一校验
-卡
-
-1. 点击「核销积分」
-2. 输入积分卡编号（一行一个，或空格分隔）
-3. 也可使用条码扫描枪直接扫描
-4. 查看核销结果与总额统计
 
 ### 4️⃣ 系统设置
 
@@ -329,48 +344,61 @@ data/
 | 模板引擎 | Jinja2 |
 | 条码生成 | python-barcode (Code128) + Pillow |
 | 文档导出 | python-docx |
+| 打印渲染 | pypdfium2（PDF → 位图，静默直打用） |
+| 桌面外壳 | C# WinForms + WebView2 |
+| 安装/更新/卸载 | .NET AOT 单文件（自建安装器） |
 | 容器化 | Docker + Docker Compose |
 
 ## 📁 项目结构
 
 ```
-launcher/                 # 原生 AOT 启动器（dist 根目录的 class-score.exe）
+launcher/                   # 原生 AOT 启动器（dist 根目录的 class-score.exe）
+├── Program.cs
+└── class-score.Launcher.csproj
 installer/
-├── ClassScore.Setup/      # 自建安装程序（WebView2 向导，输出单文件 exe）
-├── ClassScore.Uninstall/  # 独立卸载程序（单文件，支持保留数据）
-└── ClassScore.Update/     # 独立更新程序（AOT，校验后替换目录）
+├── ClassScore.Setup/       # 自建安装程序（WebView2 向导，输出单文件 exe）
+├── ClassScore.Uninstall/   # 独立卸载程序（单文件，支持保留数据）
+└── ClassScore.Update/      # 独立更新程序（AOT，校验后替换目录）
 build/
-├── package.ps1            # 打应用包
-└── make-setup.ps1         # 打单文件安装包
-class-score-system/       # Web 后端与前端模板
-├── main.py              # 核心应用（FastAPI 路由 + 业务逻辑）
-├── run.py               # 启动入口（支持 --reset 参数）
-├── reset.py             # 恢复出厂设置脚本
-├── generate_manual.py   # 用户手册生成器
-├── requirements.txt     # Python 依赖
-├── Dockerfile           # Docker 镜像定义
-├── docker-compose.yml   # Docker Compose 编排
-├── entrypoint.sh        # 容器入口脚本
-├── .dockerignore        # Docker 构建排除
-├── templates/           # Jinja2 HTML 模板
-│   ├── _sidebar.html    # 公共左侧菜单（五个内页共用）
-│   ├── init_admin.html  # 管理员初始化页
-│   ├── login.html       # 登录页
-│   ├── index.html       # 控制台（首页）
-│   ├── generate.html    # 生成积分页
-│   ├── verify.html      # 核销积分页
-│   └── setting.html     # 设置页
-├── static/              # 静态资源
-│   └── css/app.css      # 统一设计系统（颜色/圆角/阴影变量 + 组件样式）
-desktop/                  # 桌面外壳（C# WinForms + WebView2，托盘常驻）
-├── ClassScore.Desktop.csproj
-└── Program.cs            # 后端拉起 / WebView2 窗口 / 托盘菜单
-├── python/              # 内嵌 Python 运行时（不入库，见「方式二」说明）
-└── data/                # 运行时数据（自动生成）
+├── package.ps1             # 打应用包
+└── make-setup.ps1          # 打单文件安装包
+class-score-system/         # Web 后端与前端模板
+├── main.py                 # 核心应用（FastAPI 路由 + 业务逻辑）
+├── run.py                  # 启动入口（支持 --port / --dev / --reset）
+├── reset.py                # 恢复出厂设置脚本
+├── generate_manual.py      # 用户手册生成器
+├── requirements.txt        # Python 依赖
+├── Dockerfile              # Docker 镜像定义
+├── docker-compose.yml      # Docker Compose 编排
+├── entrypoint.sh           # 容器入口脚本
+├── templates/              # Jinja2 HTML 模板
+│   ├── _sidebar.html       # 公共左侧菜单（四个内页共用）
+│   ├── _history.html       # 待处理批次片段（生成页引用）
+│   ├── init_data_source.html # 初始化：全新开始 / 导入 2.x 旧库
+│   ├── welcome.html        # 欢迎过场页
+│   ├── boot.html           # 启动动画页
+│   ├── init_admin.html     # 管理员初始化页
+│   ├── login.html          # 登录页
+│   ├── index.html          # 控制台（首页）
+│   ├── generate.html       # 生成积分页
+│   ├── verify.html         # 核销积分页
+│   ├── setting.html        # 设置页
+│   └── print_sheet.html    # 浏览器打印用的 A4 卡片页
+├── static/
+│   ├── css/app.css         # 统一设计系统（颜色/圆角/阴影变量 + 组件样式）
+│   └── js/sound.js         # 核销提示音（Web Audio 播放）
+├── python/                 # 内嵌 Python 运行时（不入库，见「方式三」说明）
+└── data/                   # 运行时数据（自动生成）
     ├── config.json
+    ├── history.json
     ├── db/scores.db
-    ├── backups/         # 定时/手动备份的 zip
+    ├── backups/            # 定时/手动备份的 zip
     └── output/
+desktop/                    # 桌面外壳（C# WinForms + WebView2，托盘常驻）
+├── ClassScore.Desktop.csproj
+├── Program.cs              # 后端拉起 / WebView2 窗口 / 单实例
+├── TrayMenu.cs             # 托盘图标与右键菜单
+└── app.manifest
 ```
 
 ## 🔒 安全设计
